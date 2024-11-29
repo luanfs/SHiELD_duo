@@ -27,9 +27,8 @@
 
 module external_aero_mod
 
-	use fms_mod, only: mpp_error, FATAL
-        use fms2_io_mod, only: file_exists
-	use mpp_mod, only: mpp_pe, mpp_root_pe, mpp_npes, mpp_get_current_pelist
+	use fms_mod, only: file_exist, mpp_error, FATAL
+	use mpp_mod, only: mpp_pe, mpp_root_pe
 	use time_manager_mod, only: time_type
 	use fv_mapz_mod, only: map1_q2
 	use fv_fill_mod, only: fillz
@@ -54,10 +53,8 @@ contains
 
 subroutine load_aero(Atm, Time)
 
-        use fms2_io_mod, only: FmsNetcdfDomainFile_t, open_file, close_file, &
-                               register_restart_field, register_axis, &
-                               read_restart, get_variable_dimension_names, &
-                               get_dimension_size, close_file
+	use fms_io_mod, only: restart_file_type, register_restart_field
+	use fms_io_mod, only: restore_state
 	use fv_arrays_mod, only: fv_atmos_type
 	use diag_manager_mod, only: register_static_field, register_diag_field
 
@@ -65,13 +62,11 @@ subroutine load_aero(Atm, Time)
 
 	type(time_type), intent(in) :: Time
 	type(fv_atmos_type), intent(in), target :: Atm
-        type(FmsNetcdfDomainFile_t) :: aero_restart
+	type(restart_file_type) :: aero_restart
 
 	integer :: k
 	integer :: is, ie, js, je
-        character(len=8), dimension(4) :: dim_names_4d
-        character(len=8), dimension(3) :: dim_names_3d
-        integer, dimension(2) :: dim_size
+	integer :: id_res
 
 	real, allocatable, dimension(:,:,:,:) :: aero_lndp
 
@@ -86,11 +81,10 @@ subroutine load_aero(Atm, Time)
 		write(*,*) "aerosol 12 months climatological dataset is used for forecast."
 	endif
 
-        ! -----------------------------------------------------------------------
-        ! load aerosol data
+	! -----------------------------------------------------------------------
+	! load aerosol data
 
-        if (open_file(aero_restart, 'INPUT/'//trim(file_name), "read", Atm%domain, &
-                      & is_restart=.true., dont_add_res_to_filename=.true.)) then
+	if (file_exist('INPUT/'//trim(file_name),domain=Atm%domain)) then
 
 		! allocate share arrays
 		if (.not. allocated(aero_ps)) allocate(aero_ps(is:ie,js:je,nmon))
@@ -99,24 +93,16 @@ subroutine load_aero(Atm, Time)
 		if (.not. allocated(aero_dp)) allocate(aero_dp(is:ie,js:je,nlev,nmon))
 		if (.not. allocated(aerosol)) allocate(aerosol(is:ie,js:je,nlev,nmon))
 
-                ! read in restart files
-                call get_variable_dimension_names(aero_restart, "PS", dim_names_3d)
-                call get_variable_dimension_names(aero_restart, "DELP", dim_names_4d)
-                call get_dimension_size(aero_restart, dim_names_4d(3), dim_size(1))
-                call get_dimension_size(aero_restart, dim_names_4d(4), dim_size(2))
-                call register_axis(aero_restart, dim_names_4d(1), "x")
-                call register_axis(aero_restart, dim_names_4d(2), "y")
-                call register_axis(aero_restart, dim_names_4d(3), dim_size(1))
-                call register_axis(aero_restart, dim_names_4d(4), dim_size(2))
-                call register_restart_field(aero_restart,"PS",&
-                 aero_ps, dim_names_3d)
-                call register_restart_field(aero_restart,"DELP",&
-                aero_dp, dim_names_4d)
-                call register_restart_field(aero_restart,"SO4",&
-                aerosol, dim_names_4d)
-                call read_restart(aero_restart)
-                call close_file(aero_restart)
-        else
+		! read in restart files
+		id_res = register_restart_field(aero_restart,trim(file_name),"PS",&
+			aero_ps,domain=Atm%domain)
+		id_res = register_restart_field(aero_restart,trim(file_name),"DELP",&
+			aero_dp,domain=Atm%domain)
+		id_res = register_restart_field(aero_restart,trim(file_name),"SO4",&
+			aerosol,domain=Atm%domain)
+		call restore_state(aero_restart)
+
+	else
 
 		! stop when aerosol does not exist
 		call mpp_error("external_aero_mod",&
@@ -325,7 +311,7 @@ subroutine read_aero(is, ie, js, je, npz, nq, Time, pe, peln, qa, kord_tr, fill)
 			call map1_q2 (nlev, aero_now_pe (is:ie, j, :), aero_now_a (is:ie, js:je, :), &
 				npz, pe (is:ie, :, j), qa (is:ie, j, :, aero_id), &
 				pe (is:ie, 2:npz+1, j) - pe (is:ie, 1:npz, j), &
-				is, ie, 0, kord_tr, j, is, ie, js, je, 0.)
+				is, ie, 0, kord_tr, j, is, ie, js, je, 0., .false.)
 			if (fill) call fillz (ie-is+1, npz, 1, qa (is:ie, j, :, aero_id), &
 				pe (is:ie, 2:npz+1, j) - pe (is:ie, 1:npz, j))
 		enddo

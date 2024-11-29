@@ -34,7 +34,7 @@ module external_ic_mod
                                  FmsNetcdfFile_t, FmsNetcdfDomainFile_t, read_restart, &
                                  register_restart_field, register_axis, get_dimension_size, &
                                  get_variable_dimension_names, get_variable_num_dimensions
-   use mpp_mod,            only: mpp_error, FATAL, NOTE, WARNING, mpp_pe, mpp_root_pe
+   use mpp_mod,            only: mpp_error, FATAL, NOTE, mpp_pe, mpp_root_pe
    use mpp_mod,            only: stdlog, input_nml_file, mpp_npes, mpp_get_current_pelist
    use mpp_parameter_mod,  only: AGRID_PARAM=>AGRID
    use mpp_domains_mod,    only: mpp_get_tile_id, domain2d, mpp_update_domains, NORTH, EAST
@@ -55,6 +55,7 @@ module external_ic_mod
    use fv_surf_map_mod,   only: surfdrv, FV3_zs_filter
    use fv_surf_map_mod,   only: sgh_g, oro_g
    use fv_surf_map_mod,   only: del2_cubed_sphere, del4_cubed_sphere
+   use fv_timing_mod,     only: timing_on, timing_off
    use init_hydro_mod,    only: p_var
    use fv_fill_mod,       only: fillz
    use fv_eta_mod,        only: set_eta, set_external_eta
@@ -69,7 +70,8 @@ module external_ic_mod
    use boundary_mod,      only: nested_grid_BC, extrapolation_BC
    use mpp_domains_mod,       only: mpp_get_data_domain, mpp_get_global_domain, mpp_get_compute_domain
    use fv_grid_utils_mod, only: cubed_a2d
-
+   use duogrid_mod,       only: ext_scalar
+   
    implicit none
    private
 
@@ -137,8 +139,12 @@ contains
                                      sin(agrid(i,j,2))*cos(alpha) )
          enddo
       enddo
+      if (.not. Atm%gridstruct%dg%is_initialized) then
+          call mpp_update_domains( f0, Atm%domain )
+      else
+        call ext_scalar(f0, Atm%gridstruct%dg, Atm%bd, Atm%domain, 0, 0)
+      endif
 
-      call mpp_update_domains( f0, Atm%domain )
       if ( Atm%gridstruct%cubed_sphere .and. (.not. Atm%gridstruct%bounded_domain))then
          call fill_corners(f0, Atm%npx, Atm%npy, YDir)
       endif
@@ -153,8 +159,9 @@ contains
 ! Read in the specified external dataset and do all the needed transformation
       if ( Atm%flagstruct%ncep_ic ) then
            nq = 1
-           if( is_master() ) write(*,*) 'Calling get_ncep_ic'
+                             call timing_on('NCEP_IC')
            call get_ncep_ic( Atm, nq )
+                             call timing_off('NCEP_IC')
 #ifdef FV_TRACERS
            if (.not. cold_start) then
               call fv_io_read_tracers( Atm )
@@ -162,14 +169,18 @@ contains
            endif
 #endif
       elseif ( Atm%flagstruct%nggps_ic ) then
-           if( is_master() ) write(*,*) 'Calling get_nggps_ic'
+                             call timing_on('NGGPS_IC')
            call get_nggps_ic( Atm )
+                             call timing_off('NGGPS_IC')
       elseif ( Atm%flagstruct%hrrrv3_ic ) then
-           if( is_master() ) write(*,*) 'Calling get_hrrr_ic'
+                             call timing_on('HRRR_IC')
            call get_hrrr_ic( Atm )
+                             call timing_off('HRRR_IC')
       elseif ( Atm%flagstruct%ecmwf_ic ) then
            if( is_master() ) write(*,*) 'Calling get_ecmwf_ic'
+                             call timing_on('ECMWF_IC')
            call get_ecmwf_ic( Atm )
+                             call timing_off('ECMWF_IC')
       else
 ! The following is to read in legacy lat-lon FV core restart file
 !  is Atm%q defined in all cases?
@@ -177,15 +188,10 @@ contains
            call get_fv_ic( Atm, nq )
       endif
 
-      if (.not. (Atm%flagstruct%ncep_ic .or. Atm%flagstruct%nggps_ic) .and. Atm%flagstruct%fv_land) then
-         call mpp_error(FATAL, "fv_land = .true. only supported for ncep_ic, nggps_ic, restart run with n_zs_filter > 0, or idealized test.")
-      endif
-
       call prt_mxm('PS', Atm%ps, is, ie, js, je, ng, 1, 0.01, Atm%gridstruct%area_64, Atm%domain)
       call prt_mxm('T', Atm%pt, is, ie, js, je, ng, Atm%npz, 1., Atm%gridstruct%area_64, Atm%domain)
       if (.not.Atm%flagstruct%hydrostatic) call prt_mxm('W', Atm%w, is, ie, js, je, ng, Atm%npz, 1., Atm%gridstruct%area_64, Atm%domain)
       call prt_mxm('SPHUM', Atm%q(:,:,:,1), is, ie, js, je, ng, Atm%npz, 1., Atm%gridstruct%area_64, Atm%domain)
-
       if ( Atm%flagstruct%nggps_ic .or. Atm%flagstruct%ecmwf_ic .or. Atm%flagstruct%hrrrv3_ic ) then
         sphum   = get_tracer_index(MODEL_ATMOS, 'sphum')
         liq_wat   = get_tracer_index(MODEL_ATMOS, 'liq_wat')
@@ -228,9 +234,8 @@ contains
     real, allocatable :: g_dat2(:,:,:)
     real, allocatable :: pt_coarse(:,:,:)
     integer isc_p, iec_p, jsc_p, jec_p, isg, ieg, jsg,jeg
-    integer :: i,j
 
-    integer :: is,  ie,  js,  je
+      integer :: is,  ie,  js,  je
     integer :: isd, ied, jsd, jed, ng
 
     is  = Atm%bd%is
@@ -253,28 +258,25 @@ contains
          call read_data(Fv_core, 'phis', Atm%phis(is:ie,js:je))
          call close_file(Fv_core)
        else
-       call mpp_error(NOTE, fname//' not found (forgot your restart files?); generating terrain from USGS data')
+       call mpp_error(NOTE, fname//' not found; generating terrain from USGS data')
        call surfdrv(  Atm%npx, Atm%npy, Atm%gridstruct%grid_64, Atm%gridstruct%agrid_64,   &
-            Atm%gridstruct%area_64, Atm%gridstruct%dx, Atm%gridstruct%dy, &
-            Atm%gridstruct%dxa, Atm%gridstruct%dya, &
-            Atm%gridstruct%dxc, Atm%gridstruct%dyc, Atm%gridstruct%sin_sg, &
-            Atm%phis, Atm%flagstruct%stretch_fac, &
-            Atm%neststruct%nested, Atm%gridstruct%bounded_domain, &
-            Atm%neststruct%npx_global, Atm%domain, &
-            Atm%flagstruct%grid_number, Atm%bd )
-       if ( Atm%flagstruct%fv_land ) then
-          do j=js,je
-             do i=is,ie
-                Atm%sgh(i,j) = sgh_g(i,j)
-                Atm%oro(i,j) = oro_g(i,j)
-             enddo
-          enddo
+                         Atm%gridstruct%area_64, Atm%gridstruct%dx, Atm%gridstruct%dy, &
+                         Atm%gridstruct%dxa, Atm%gridstruct%dya, &
+                         Atm%gridstruct%dxc, Atm%gridstruct%dyc, Atm%gridstruct%sin_sg, &
+                         Atm%phis, Atm%flagstruct%stretch_fac, &
+                         Atm%neststruct%nested, Atm%gridstruct%bounded_domain, &
+                         Atm%neststruct%npx_global, Atm%domain, &
+                         Atm%flagstruct%grid_number, Atm%bd )
        endif
-    endif
 
 
     !Needed for reproducibility. DON'T REMOVE THIS!!
-    call mpp_update_domains( Atm%phis, Atm%domain )
+      if (.not. Atm%gridstruct%dg%is_initialized) then
+          call mpp_update_domains( Atm%phis, Atm%domain )
+      else
+        call ext_scalar(Atm%phis, Atm%gridstruct%dg, Atm%bd, Atm%domain, 0, 0)
+      endif
+
     ftop = g_sum(Atm%domain, Atm%phis(is:ie,js:je), is, ie, js, je, ng, Atm%gridstruct%area_64, 1)
 
     call prt_mxm('ZS', Atm%phis,  is, ie, js, je, ng, 1, 1./grav, Atm%gridstruct%area_64, Atm%domain)
@@ -310,7 +312,7 @@ contains
     type(fv_atmos_type), intent(inout) :: Atm
 ! local:
     real, dimension(:), allocatable:: ak, bk
-    real, dimension(:,:), allocatable:: wk2, ps, oro_ic
+    real, dimension(:,:), allocatable:: wk2, ps, oro_g
     real, dimension(:,:,:), allocatable:: ud, vd, u_w, v_w, u_s, v_s, omga, temp
     real, dimension(:,:,:), allocatable:: zh(:,:,:)  ! 3D height at 65 edges
     real, dimension(:,:,:,:), allocatable:: q
@@ -460,13 +462,18 @@ contains
       endif
 
       if ( Atm%flagstruct%full_zs_filter) then
-        allocate (oro_ic(isd:ied,jsd:jed))
-        oro_ic = 0.
+        allocate (oro_g(isd:ied,jsd:jed))
+        oro_g = 0.
         ! land-frac
-        call register_restart_field(ORO_restart, 'land_frac', oro_ic, dim_names_2d)
-        call mpp_update_domains(oro_ic, Atm%domain)
+        call register_restart_field(ORO_restart, 'land_frac', oro_g, dim_names_2d)
+      if (.not. Atm%gridstruct%dg%is_initialized) then
+          call mpp_update_domains( oro_g, Atm%domain )
+      else
+        call ext_scalar(oro_g, Atm%gridstruct%dg, Atm%bd, Atm%domain, 0, 0)
+      endif
+
         if (Atm%neststruct%nested) then
-          call extrapolation_BC(oro_ic, 0, 0, Atm%npx, Atm%npy, Atm%bd, .true.)
+          call extrapolation_BC(oro_g, 0, 0, Atm%npx, Atm%npy, Atm%bd, .true.)
         endif
       endif
 
@@ -583,16 +590,19 @@ contains
 
     !!! Perform terrain smoothing, if desired
     if ( Atm%flagstruct%full_zs_filter ) then
-
-       call mpp_update_domains(Atm%phis, Atm%domain)
+      if (.not. Atm%gridstruct%dg%is_initialized) then
+          call mpp_update_domains( Atm%phis, Atm%domain )
+      else
+        call ext_scalar(Atm%phis, Atm%gridstruct%dg, Atm%bd, Atm%domain, 0, 0)
+      endif
 
        call FV3_zs_filter( Atm%bd, isd, ied, jsd, jed, npx, npy, Atm%neststruct%npx_global, &
             Atm%flagstruct%stretch_fac, Atm%gridstruct%bounded_domain, Atm%domain, &
             Atm%gridstruct%area_64, Atm%gridstruct%dxa, Atm%gridstruct%dya, &
             Atm%gridstruct%dx, Atm%gridstruct%dy, Atm%gridstruct%dxc, &
             Atm%gridstruct%dyc, Atm%gridstruct%grid_64, Atm%gridstruct%agrid_64, &
-            Atm%gridstruct%sin_sg, Atm%phis, oro_ic)
-       deallocate(oro_ic)
+            Atm%gridstruct%sin_sg, Atm%phis, oro_g)
+       deallocate(oro_g)
     endif
 
 
@@ -603,7 +613,7 @@ contains
                Atm%gridstruct%area_64, Atm%gridstruct%dx, Atm%gridstruct%dy,   &
                Atm%gridstruct%dxc, Atm%gridstruct%dyc, Atm%gridstruct%sin_sg, &
                Atm%flagstruct%n_zs_filter, cnst_0p20*Atm%gridstruct%da_min, &
-               .false., oro_ic, Atm%gridstruct%bounded_domain, &
+               .false., oro_g, Atm%gridstruct%bounded_domain, &
          Atm%domain, Atm%bd)
         if ( is_master() ) write(*,*) 'Warning !!! del-2 terrain filter has been applied ', &
                Atm%flagstruct%n_zs_filter, ' times'
@@ -611,7 +621,7 @@ contains
         call del4_cubed_sphere(Atm%npx, Atm%npy, Atm%phis, Atm%gridstruct%area_64, &
                Atm%gridstruct%dx, Atm%gridstruct%dy,   &
                Atm%gridstruct%dxc, Atm%gridstruct%dyc, Atm%gridstruct%sin_sg, &
-               Atm%flagstruct%n_zs_filter, .false., oro_ic, &
+               Atm%flagstruct%n_zs_filter, .false., oro_g, &
          Atm%gridstruct%bounded_domain, &
                Atm%domain, Atm%bd)
         if ( is_master() ) write(*,*) 'Warning !!! del-4 terrain filter has been applied ', &
@@ -631,8 +641,12 @@ contains
       enddo
       deallocate(phis_coarse)
     endif
+      if (.not. Atm%gridstruct%dg%is_initialized) then
+          call mpp_update_domains( Atm%phis, Atm%domain )
+      else
+        call ext_scalar(Atm%phis, Atm%gridstruct%dg, Atm%bd, Atm%domain, 0, 0)
+      endif
 
-    call mpp_update_domains( Atm%phis, Atm%domain, complete=.true. )
     liq_wat = get_tracer_index(MODEL_ATMOS, 'liq_wat')
     ice_wat = get_tracer_index(MODEL_ATMOS, 'ice_wat')
     rainwat = get_tracer_index(MODEL_ATMOS, 'rainwat')
@@ -832,7 +846,7 @@ contains
       type(fv_atmos_type), intent(inout) :: Atm
 ! local:
       real, dimension(:), allocatable:: ak, bk
-      real, dimension(:,:), allocatable:: wk2, ps, oro_ic
+      real, dimension(:,:), allocatable:: wk2, ps, oro_g
       real, dimension(:,:,:), allocatable:: ud, vd, u_w, v_w, u_s, v_s, w, t
       real, dimension(:,:,:), allocatable:: zh ! 3D height at 51 edges
       real, dimension(:,:,:,:), allocatable:: q
@@ -971,11 +985,11 @@ contains
           endif
 
           if ( Atm%flagstruct%full_zs_filter) then
-            allocate (oro_ic(isd:ied,jsd:jed))
-            oro_ic = 0.
+            allocate (oro_g(isd:ied,jsd:jed))
+            oro_g = 0.
             ! land-frac
-            call register_restart_field(ORO_restart, 'land_frac', oro_ic, dim_names_2d)
-            call mpp_update_domains(oro_ic, Atm%domain)
+            call register_restart_field(ORO_restart, 'land_frac', oro_g, dim_names_2d)
+            call mpp_update_domains(oro_g, Atm%domain)
           endif
 
           if ( Atm%flagstruct%fv_land ) then
@@ -1122,8 +1136,8 @@ contains
                 Atm%gridstruct%area_64, Atm%gridstruct%dxa, Atm%gridstruct%dya, &
                 Atm%gridstruct%dx, Atm%gridstruct%dy, Atm%gridstruct%dxc, &
                 Atm%gridstruct%dyc, Atm%gridstruct%grid_64, Atm%gridstruct%agrid_64, &
-                Atm%gridstruct%sin_sg, Atm%phis, oro_ic)
-           deallocate(oro_ic)
+                Atm%gridstruct%sin_sg, Atm%phis, oro_g)
+           deallocate(oro_g)
         endif
 
 
@@ -1134,7 +1148,7 @@ contains
                    Atm%gridstruct%area_64, Atm%gridstruct%dx, Atm%gridstruct%dy,   &
                    Atm%gridstruct%dxc, Atm%gridstruct%dyc, Atm%gridstruct%sin_sg, &
                    Atm%flagstruct%n_zs_filter, cnst_0p20*Atm%gridstruct%da_min, &
-                   .false., oro_ic, Atm%gridstruct%bounded_domain, &
+                   .false., oro_g, Atm%gridstruct%bounded_domain, &
                    Atm%domain, Atm%bd)
             if ( is_master() ) write(*,*) 'Warning !!! del-2 terrain filter has been applied ', &
                    Atm%flagstruct%n_zs_filter, ' times'
@@ -1142,7 +1156,7 @@ contains
             call del4_cubed_sphere(Atm%npx, Atm%npy, Atm%phis, Atm%gridstruct%area_64, &
                    Atm%gridstruct%dx, Atm%gridstruct%dy,   &
                    Atm%gridstruct%dxc, Atm%gridstruct%dyc, Atm%gridstruct%sin_sg, &
-                   Atm%flagstruct%n_zs_filter, .false., oro_ic, &
+                   Atm%flagstruct%n_zs_filter, .false., oro_g, &
                    Atm%gridstruct%bounded_domain, &
                    Atm%domain, Atm%bd)
             if ( is_master() ) write(*,*) 'Warning !!! del-4 terrain filter has been applied ', &
@@ -1765,7 +1779,7 @@ contains
       real(kind=4), allocatable:: uec(:,:,:), vec(:,:,:), tec(:,:,:), wec(:,:,:)
       real(kind=4), allocatable:: psec(:,:), zsec(:,:), zhec(:,:,:), qec(:,:,:,:)
       real(kind=4), allocatable:: psc(:,:)
-      real(kind=4), allocatable:: sphumec(:,:,:),o3ec(:,:,:)
+      real(kind=4), allocatable:: sphumec(:,:,:)
       real, allocatable:: psc_r8(:,:), zhc(:,:,:), qc(:,:,:,:)
       real, allocatable:: lat(:), lon(:), ak0(:), bk0(:)
       real, allocatable:: pt_c(:,:,:), pt_d(:,:,:)
@@ -1889,53 +1903,48 @@ contains
       if(is_master()) write(*,*) 'done reading model terrain from oro_data.nc'
       call mpp_update_domains( Atm%phis, Atm%domain )
 
+!! Read in o3mr, ps and zh from GFS_data.tile?.nc
+      allocate (o3mr_gfs(is:ie,js:je,levp_gfs))
+      allocate (ps_gfs(is:ie,js:je))
+      allocate (zh_gfs(is:ie,js:je,levp_gfs+1))
 
-!! No O3 in IFS IC before the DIMOSIC period (201806).
-      if ( Atm%flagstruct%use_gfsO3 ) then
-          if( is_master() ) write(*,*) 'using GFS O3 with other ECMWF ICs:'
-          !! Read in o3mr, ps and zh from GFS_data.tile?.nc
-          allocate (o3mr_gfs(is:ie,js:je,levp_gfs))
-          allocate (ps_gfs(is:ie,js:je))
-          allocate (zh_gfs(is:ie,js:je,levp_gfs+1))
-
-          if( open_file(GFS_restart, fn_gfs_ics, "read", Atm%domain_for_read, is_restart=.true., dont_add_res_to_filename=.true.) ) then
-            call register_axis(GFS_restart, "lat", "y")
-            call register_axis(GFS_restart, "lon", "x")
-            call register_axis(GFS_restart, "lev", size(o3mr_gfs,3))
-            call register_axis(GFS_restart, "levp", size(zh_gfs,3))
-            call register_restart_field(GFS_restart, 'o3mr', o3mr_gfs, dim_names_3d3, is_optional=.true.)
-            call register_restart_field(GFS_restart, 'ps', ps_gfs, dim_names_2d)
-            call register_restart_field(GFS_restart, 'zh', zh_gfs, dim_names_3d4)
-            call read_restart(GFS_restart)
-            call close_file(GFS_restart)
-          endif
-
-          ! Get GFS ak, bk for o3mr vertical interpolation
-          allocate (wk2(levp_gfs+1,2))
-          allocate (ak_gfs(levp_gfs+1))
-          allocate (bk_gfs(levp_gfs+1))
-          allocate(pes(mpp_npes()))
-          call mpp_get_current_pelist(pes)
-          if( open_file(Gfs_ctl, fn_gfs_ctl, "read", pelist=pes) ) then
-            call read_data(Gfs_ctl,'vcoord',wk2)
-            call close_file(Gfs_ctl)
-          endif
-          deallocate(pes)
-          ak_gfs(1:levp_gfs+1) = wk2(1:levp_gfs+1,1)
-          bk_gfs(1:levp_gfs+1) = wk2(1:levp_gfs+1,2)
-          deallocate (wk2)
-
-          if ( bk_gfs(1) < 1.E-9 ) ak_gfs(1) = max(1.e-9, ak_gfs(1))
-
-          iq = o3mr
-          if(is_master()) write(*,*) 'Reading o3mr from GFS_data.nc:'
-          if(is_master()) write(*,*) 'o3mr =', iq
-          call remap_scalar_single(Atm, levp_gfs, npz, ak_gfs, bk_gfs, ps_gfs, o3mr_gfs, zh_gfs, iq)
-
-          deallocate (ak_gfs, bk_gfs)
-          deallocate (ps_gfs, zh_gfs)
-          deallocate (o3mr_gfs)
+      if( open_file(GFS_restart, fn_gfs_ics, "read", Atm%domain_for_read, is_restart=.true., dont_add_res_to_filename=.true.) ) then
+        call register_axis(GFS_restart, "lat", "y")
+        call register_axis(GFS_restart, "lon", "x")
+        call register_axis(GFS_restart, "lev", size(o3mr_gfs,3))
+        call register_axis(GFS_restart, "levp", size(zh_gfs,3))
+        call register_restart_field(GFS_restart, 'o3mr', o3mr_gfs, dim_names_3d3, is_optional=.true.)
+        call register_restart_field(GFS_restart, 'ps', ps_gfs, dim_names_2d)
+        call register_restart_field(GFS_restart, 'zh', zh_gfs, dim_names_3d4)
+        call read_restart(GFS_restart)
+        call close_file(GFS_restart)
       endif
+
+      ! Get GFS ak, bk for o3mr vertical interpolation
+      allocate (wk2(levp_gfs+1,2))
+      allocate (ak_gfs(levp_gfs+1))
+      allocate (bk_gfs(levp_gfs+1))
+      allocate(pes(mpp_npes()))
+      call mpp_get_current_pelist(pes)
+      if( open_file(Gfs_ctl, fn_gfs_ctl, "read", pelist=pes) ) then
+        call read_data(Gfs_ctl,'vcoord',wk2)
+        call close_file(Gfs_ctl)
+      endif
+      deallocate(pes)
+      ak_gfs(1:levp_gfs+1) = wk2(1:levp_gfs+1,1)
+      bk_gfs(1:levp_gfs+1) = wk2(1:levp_gfs+1,2)
+      deallocate (wk2)
+
+      if ( bk_gfs(1) < 1.E-9 ) ak_gfs(1) = max(1.e-9, ak_gfs(1))
+
+      iq = o3mr
+      if(is_master()) write(*,*) 'Reading o3mr from GFS_data.nc:'
+      if(is_master()) write(*,*) 'o3mr =', iq
+      call remap_scalar_single(Atm, levp_gfs, npz, ak_gfs, bk_gfs, ps_gfs, o3mr_gfs, zh_gfs, iq)
+
+      deallocate (ak_gfs, bk_gfs)
+      deallocate (ps_gfs, zh_gfs)
+      deallocate (o3mr_gfs)
 
 !! Start to read EC data
       fname = Atm%flagstruct%res_latlon_dynamics
@@ -1991,7 +2000,7 @@ contains
           if ( bk0(1) < 1.E-9 ) ak0(1) = max(1.e-9, ak0(1))
 
       else
-          call mpp_error(FATAL,'==> Error in get_external_ic: Expected file '//trim(fname)//' for ECMWF IC does not exist')
+          call mpp_error(FATAL,'==> Error in get_external_ic: Expected file '//trim(fname)//' for NCEP IC does not exist')
       endif
 
 ! Initialize lat-lon to Cubed bi-linear interpolation coeff:
@@ -2037,17 +2046,6 @@ contains
       tec(:,:,:) = tec(:,:,:)*scale_value + offset
       if(is_master()) write(*,*) 'done reading tec'
 
-! read in ozone:
-      if ( .not. Atm%flagstruct%use_gfsO3 ) then
-          allocate ( o3ec(1:im,jbeg:jend, 1:km) )
-
-          call get_var3_r4( ncid, 'o3', 1,im, jbeg,jend, 1,km, o3ec(:,:,:) )
-          call get_var_att_double ( ncid, 'o3', 'scale_factor', scale_value )
-          call get_var_att_double ( ncid, 'o3', 'add_offset', offset )
-          o3ec(:,:,:) = o3ec(:,:,:)*scale_value + offset
-          if(is_master()) write(*,*) 'done reading o3mr ec'
-      endif
-
 ! read in specific humidity:
       allocate ( sphumec(1:im,jbeg:jend, 1:km) )
 
@@ -2058,9 +2056,9 @@ contains
       if(is_master()) write(*,*) 'done reading sphum ec'
 
 ! Read in other tracers from EC data and remap them into cubic sphere grid:
-      allocate ( qec(1:im,jbeg:jend,1:km,ntracers) )
+      allocate ( qec(1:im,jbeg:jend,1:km,5) )
 
-      do n = 1, ntracers
+      do n = 1, 5
         if (n == sphum) then
            qec(:,:,:,sphum) = sphumec(:,:,:)
            deallocate ( sphumec )
@@ -2088,12 +2086,8 @@ contains
            call get_var_att_double ( ncid, 'cswc', 'add_offset', offset )
            qec(:,:,:,snowwat) = qec(:,:,:,snowwat)*scale_value + offset
            if(is_master()) write(*,*) 'done reading cswc ec'
-        else if (n == o3mr .and. (.not. Atm%flagstruct%use_gfsO3)) then
-           qec(:,:,:,o3mr) = o3ec(:,:,:)
-           deallocate ( o3ec )
         else
-           qec(:,:,:,n) = 0.0
-           if(is_master()) write(*,*) 'tracer number = ', n, 'is not in the IFS IC.'
+           if(is_master()) write(*,*) 'nq is more then 5!'
         endif
 
       enddo
@@ -2154,10 +2148,10 @@ contains
 
       if(is_master()) write(*,*) 'done interpolate psec/zhec into cubic grid psc/zhc!'
 
-! Remap hydrometeor tracers and ozone (if not using GFS ozone) from EC grid into cubic sphere grid:
-      allocate ( qc(is:ie,js:je,km,ntracers) )
+! Read in other tracers from EC data and remap them into cubic sphere grid:
+      allocate ( qc(is:ie,js:je,km,6) )
 
-      do n = 1, ntracers
+      do n = 1, 5
 !$OMP parallel do default(none) shared(n,is,ie,js,je,km,s2c,id1,id2,jdc,qc,qec) &
 !$OMP               private(i1,i2,j1)
         do k=1,km
@@ -2173,9 +2167,10 @@ contains
         enddo
       enddo
 
+      qc(:,:,:,graupel) = 0.   ! note Graupel must be tracer #6
+
       deallocate ( qec )
       if(is_master()) write(*,*) 'done interpolate tracers (qec) into cubic (qc)'
-
 
 ! Read in vertical wind from EC data and remap them into cubic sphere grid:
       allocate ( wec(1:im,jbeg:jend, 1:km) )
@@ -2209,7 +2204,7 @@ contains
       psc_r8(:,:) = psc(:,:)
       deallocate ( psc )
 
-      call remap_scalar(Atm, km, npz, ntracers, ak0, bk0, psc_r8, qc, zhc, wc)
+      call remap_scalar(Atm, km, npz, 6, ak0, bk0, psc_r8, qc, zhc, wc)
       call mpp_update_domains(Atm%phis, Atm%domain)
       if(is_master()) write(*,*) 'done remap_scalar'
 
@@ -2379,7 +2374,7 @@ contains
                                 Atm%q(i,j,k,graupel))
                endif
                m_fac = wt / qt
-               do iq=1,Atm%flagstruct%nwat
+               do iq=1,ntracers
                   Atm%q(i,j,k,iq) = m_fac * Atm%q(i,j,k,iq)
                enddo
                Atm%delp(i,j,k) = qt
@@ -2807,7 +2802,7 @@ contains
 #endif
 
 !$OMP parallel do default(none) &
-!$OMP             shared(sphum,o3mr,liq_wat,rainwat,ice_wat,snowwat,graupel,source_fv3gfs,&
+!$OMP             shared(sphum,liq_wat,rainwat,ice_wat,snowwat,graupel,source_fv3gfs,&
 !$OMP                    cld_amt,ncnst,npz,is,ie,js,je,km,k2,ak0,bk0,psc,zh,omga,qa,Atm,z500,t_in) &
 !$OMP             private(l,m,pst,pn,gz,pe0,pn0,pe1,pn1,dp2,qp,qn1,gz_fv)
 
@@ -2890,15 +2885,7 @@ contains
 ! The HiRam step of blending model sphum with NCEP data is obsolete because nggps is always cold starting...
          do k=1,npz
             do i=is,ie
-
-               if ( iq==o3mr ) then
-                  if (.not. Atm%flagstruct%use_gfsO3) then
-                     Atm%q(i,j,k,iq) = qn1(i,k)
-                  endif
-               else
-                  Atm%q(i,j,k,iq) = qn1(i,k)
-               endif
-
+               Atm%q(i,j,k,iq) = qn1(i,k)
             enddo
          enddo
       enddo
@@ -3263,7 +3250,10 @@ contains
   jed = Atm%bd%jed
 
 !Not sure what this is for
-  if (Atm%gridstruct%bounded_domain) then
+
+!Also, for some reason, there is a big discrepency here in the resultant remapped wind fields if 
+!duo uses bounded_domain
+  if (Atm%gridstruct%bounded_domain .and. .not. Atm%gridstruct%dg%is_initialized) then
      do j=jsd,jed
      do i=isd,ied
         psd(i,j) = Atm%ps(i,j)
@@ -3276,8 +3266,13 @@ contains
         enddo
      enddo
   endif
+      if (.not. Atm%gridstruct%dg%is_initialized) then
   call mpp_update_domains( psd,    Atm%domain, complete=.false. )
   call mpp_update_domains( Atm%ps, Atm%domain, complete=.true. )
+      else
+        call ext_scalar(psd, Atm%gridstruct%dg, Atm%bd, Atm%domain, 0, 0)
+        call ext_scalar(Atm%ps, Atm%gridstruct%dg, Atm%bd, Atm%domain, 0, 0)
+      endif
 
 !$OMP parallel do default(none) shared(is,ie,js,je,npz,km,ak0,bk0,Atm,psc,psd,ud,vd) &
 !$OMP                          private(pe1,pe0,qn1)
@@ -3664,7 +3659,7 @@ contains
 !----------------------------------------------
 ! winds: lat-lon ON A to Cubed-D transformation:
 !----------------------------------------------
-  call cubed_a2d(Atm%npx, Atm%npy, npz, ut, vt, Atm%u, Atm%v, Atm%gridstruct, Atm%flagstruct, Atm%domain, Atm%bd )
+  call cubed_a2d(Atm%npx, Atm%npy, npz, ut, vt, Atm%u, Atm%v, Atm%gridstruct,  Atm%flagstruct, Atm%domain, Atm%bd )
 
   if (is_master()) write(*,*) 'done remap_xyz'
 
@@ -3949,3 +3944,4 @@ subroutine pmaxmn(qname, q, is, ie, js, je, km, fac, area, domain)
 
 
  end module external_ic_mod
+

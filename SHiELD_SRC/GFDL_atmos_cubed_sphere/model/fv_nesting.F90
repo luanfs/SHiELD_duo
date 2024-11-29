@@ -2759,7 +2759,7 @@ subroutine twoway_nesting(Atm, ngrids, grids_on_this_pe, zvir, Time, this_grid)
 
     real, intent(inout), dimension(bd%isd:bd%ied ,bd%jsd:bd%jed ,npz):: ua, va
     type(fv_grid_type), intent(INOUT) :: gridstruct
-    type(fv_flags_type), intent(INOUT) :: flagstruct
+    type(fv_flags_type), intent(IN) :: flagstruct
     type(domain2d), intent(INOUT) :: domain
     type(time_type), intent(IN) :: Time
 
@@ -2781,6 +2781,7 @@ subroutine twoway_nesting(Atm, ngrids, grids_on_this_pe, zvir, Time, this_grid)
          gridstruct, flagstruct, npx, npy, npz, &
          1, gridstruct%grid_type, domain, &
          gridstruct%bounded_domain, flagstruct%c2l_ord, bd)
+
 #ifndef SW_DYNAMICS
 
    !To get coarse grid pkz, etc right after a two-way update so

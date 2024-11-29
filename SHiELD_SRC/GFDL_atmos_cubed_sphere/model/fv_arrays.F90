@@ -75,110 +75,6 @@ module fv_arrays_mod
   end type fv_grid_bounds_type
 
 
-   !---------------------------------------------------------
-   ! Type for Lagrange polynomials at ghost cells on the cubed-sphere
-   !---------------------------------------------------------
-   type lagrange_poly
-       real (kind=R_GRID), allocatable  :: y_Agrid_given(:)    ! A grid points using panel 2 coordinates
-       real (kind=R_GRID), allocatable  :: angles_a(:)         ! A grid point angles
-       real (kind=R_GRID), allocatable  :: tan_angles_a(:)     ! A grid point tan(angles)
-       real (kind=R_GRID), allocatable  :: y_Agrid_target(:,:) ! Nodes where we perform interpolation
-       real (kind=R_GRID), allocatable  :: p_Agrid_ydir(:,:,:) ! Lagrange polynomials at nodes
-
-       ! interpolation weights for corner diagonal  
-       real (kind=R_GRID), allocatable  :: p_corner1(:,:)
-       real (kind=R_GRID), allocatable  :: p_corner2(:,:)
-
-
-       ! buffers
-       real (kind=R_GRID), allocatable  :: E_buffer(:,:,:)
-       real (kind=R_GRID), allocatable  :: N_buffer(:,:,:)
-       real (kind=R_GRID), allocatable  :: S_buffer(:,:,:)
-       real (kind=R_GRID), allocatable  :: W_buffer(:,:,:)
-
-       real (kind=R_GRID), allocatable  :: E_buffer_local(:,:,:)
-       real (kind=R_GRID), allocatable  :: N_buffer_local(:,:,:)
-       real (kind=R_GRID), allocatable  :: S_buffer_local(:,:,:)
-       real (kind=R_GRID), allocatable  :: W_buffer_local(:,:,:)
-
-       ! LATLON wind buffers
-       real (kind=R_GRID), allocatable  :: E_buffer_ua_ll(:,:,:)
-       real (kind=R_GRID), allocatable  :: N_buffer_ua_ll(:,:,:)
-       real (kind=R_GRID), allocatable  :: S_buffer_ua_ll(:,:,:)
-       real (kind=R_GRID), allocatable  :: W_buffer_ua_ll(:,:,:)
-
-       real (kind=R_GRID), allocatable  :: E_buffer_va_ll(:,:,:)
-       real (kind=R_GRID), allocatable  :: N_buffer_va_ll(:,:,:)
-       real (kind=R_GRID), allocatable  :: S_buffer_va_ll(:,:,:)
-       real (kind=R_GRID), allocatable  :: W_buffer_va_ll(:,:,:)
-
-       ! CUBE wind buffers
-       real (kind=R_GRID), allocatable  :: E_buffer_ua_c(:,:,:)
-       real (kind=R_GRID), allocatable  :: N_buffer_ua_c(:,:,:)
-       real (kind=R_GRID), allocatable  :: S_buffer_ua_c(:,:,:)
-       real (kind=R_GRID), allocatable  :: W_buffer_ua_c(:,:,:)
-
-       real (kind=R_GRID), allocatable  :: E_buffer_va_c(:,:,:)
-       real (kind=R_GRID), allocatable  :: N_buffer_va_c(:,:,:)
-       real (kind=R_GRID), allocatable  :: S_buffer_va_c(:,:,:)
-       real (kind=R_GRID), allocatable  :: W_buffer_va_c(:,:,:)
-
-
-       ! aux vars
-       real (kind=R_GRID), allocatable  :: var(:,:,:)
-       real (kind=R_GRID), allocatable  :: ua_ll(:,:,:)
-       real (kind=R_GRID), allocatable  :: va_ll(:,:,:)
-       real (kind=R_GRID), allocatable  :: ua_c(:,:,:)
-       real (kind=R_GRID), allocatable  :: va_c(:,:,:)
-
-       !-----------------------------------------------------------------------------------
-       !bgrid variables
-       real (kind=R_GRID), allocatable  :: var_b(:,:,:)
-       real (kind=R_GRID), allocatable  :: y_Bgrid_given(:)    ! B grid points using panel 2 coordinates
-       real (kind=R_GRID), allocatable  :: angles_b(:)         ! B grid point angles
-       real (kind=R_GRID), allocatable  :: tan_angles_b(:)     ! B grid point tan(angles)
-       real (kind=R_GRID), allocatable  :: y_Bgrid_target(:,:) ! Nodes where we perform interpolation
-       real (kind=R_GRID), allocatable  :: p_Bgrid_ydir(:,:,:) ! Lagrange polynomials at nodes
-
-       real (kind=R_GRID), allocatable  :: E_buffer_b(:,:,:)
-       real (kind=R_GRID), allocatable  :: N_buffer_b(:,:,:)
-       real (kind=R_GRID), allocatable  :: S_buffer_b(:,:,:)
-       real (kind=R_GRID), allocatable  :: W_buffer_b(:,:,:)
-
-       real (kind=R_GRID), allocatable  :: E_buffer_local_b(:,:,:)
-       real (kind=R_GRID), allocatable  :: N_buffer_local_b(:,:,:)
-       real (kind=R_GRID), allocatable  :: S_buffer_local_b(:,:,:)
-       real (kind=R_GRID), allocatable  :: W_buffer_local_b(:,:,:)
-       !-----------------------------------------------------------------------------------
-
-
-       real (kind=R_GRID), allocatable  :: dy
-       real (kind=R_GRID), allocatable  :: aref
-       real (kind=R_GRID), allocatable  :: Rref
-
-       ! stencil
-       integer, allocatable :: stencil_start_a(:,:), stencil_end_a(:,:) ! A grid
-       integer, allocatable :: stencil_start_b(:,:), stencil_end_b(:,:) ! B grid
-
-       ! polynomial degree
-       integer :: degree
-       integer :: stencil_offset
-
-       ! order (=degree+1)
-       integer :: order
-
-       ! halo size
-       integer :: ng
-       integer :: ng_scalar
-       integer :: ng_wind
-
-       ! aux indexes
-       integer :: jsd, jed
-       integer :: js , je
-
-       ! N
-       integer :: N
-   end type lagrange_poly
 
    type duogrid_type
 
@@ -249,9 +145,8 @@ module fv_arrays_mod
         real(kind=R_GRID), allocatable :: yp3(:,:,:,:)
         real(kind=R_GRID), allocatable :: ym3(:,:,:,:)
         type(domain2D) :: domain_for_duo
-        type(domain2D) :: domain_for_duo2
         type(fv_grid_bounds_type) :: bd
-        type(lagrange_poly) :: L
+
         logical :: rmp_w  = .false.
         logical :: rmp_e  = .false.
         logical :: rmp_s  = .false.
@@ -262,7 +157,7 @@ module fv_arrays_mod
         logical :: rmp_ne = .false.
 
         !--- k2e rmp parameter
-        integer :: k2e_nord = 4 !--- WATCH FOR CONSISTENCY WITH GLOBAL_GRID
+        integer :: k2e_nord = 2 !--- WATCH FOR CONSISTENCY WITH GLOBAL_GRID
         integer, dimension(:,:), allocatable :: k2e_loc
         real(kind=R_GRID), dimension(:,:,:), allocatable :: k2e_coef
         integer, dimension(:,:), allocatable :: k2e_loc_b
@@ -276,13 +171,9 @@ module fv_arrays_mod
         integer, dimension(:,:), allocatable :: k2e_loc_d_y
         real(kind=R_GRID), dimension(:,:,:), allocatable :: k2e_coef_d_y
 
-        real, dimension(:,:,:), allocatable:: S_Ndg, S_Wdg, S_Edg, S_Sdg
         !--- type status
         logical :: is_initialized = .false.
         integer :: layout(2) = (/ 1,1 /)
-
-        !--- duogrid interpolation scheme
-        integer :: duogrid_scheme = 2 !1- Joseph's version, 2-Luan's version
 end type duogrid_type
 
 
@@ -294,7 +185,6 @@ end type duogrid_type
   type fv_grid_type
      type(duogrid_type) :: dg
      real(kind=R_GRID), allocatable, dimension(:,:,:) :: grid_64, agrid_64
-     real(kind=R_GRID), allocatable, dimension(:,:,:) :: cgrid_64, dgrid_64
      real(kind=R_GRID), allocatable, dimension(:,:) :: area_64, area_c_64
      real(kind=R_GRID), allocatable, dimension(:,:) :: sina_64, cosa_64
      real(kind=R_GRID), allocatable, dimension(:,:) :: dx_64, dy_64
@@ -313,42 +203,6 @@ end type duogrid_type
      real, allocatable, dimension(:,:) :: rdx, rdy
      real, allocatable, dimension(:,:) :: rdxc, rdyc
      real, allocatable, dimension(:,:) :: rdxa, rdya
-
-     ! metric term
-     real(kind=R_GRID), allocatable, dimension(:,:) ::  metricterm_a
-     real(kind=R_GRID), allocatable, dimension(:,:) :: rmetricterm_a
-     real(kind=R_GRID), allocatable, dimension(:,:) ::  metricterm_b
-     real(kind=R_GRID), allocatable, dimension(:,:) :: rmetricterm_b
-
-     real(kind=R_GRID), allocatable, dimension(:,:) ::  metricterm_c
-     real(kind=R_GRID), allocatable, dimension(:,:) ::  metricterm_d
-
-
-     ! norm of tangent vectors
-     real(kind=R_GRID), allocatable, dimension(:,:) ::  norm_tgx_b
-     real(kind=R_GRID), allocatable, dimension(:,:) ::  norm_tgy_b
-     real(kind=R_GRID), allocatable, dimension(:,:) ::  norm_tgx_c
-     real(kind=R_GRID), allocatable, dimension(:,:) ::  norm_tgy_c
-     real(kind=R_GRID), allocatable, dimension(:,:) ::  norm_tgx_d
-     real(kind=R_GRID), allocatable, dimension(:,:) ::  norm_tgy_d
-
-     real(kind=R_GRID), allocatable, dimension(:,:) ::  rnorm_tgx_b
-     real(kind=R_GRID), allocatable, dimension(:,:) ::  rnorm_tgy_b
-     real(kind=R_GRID), allocatable, dimension(:,:) ::  rnorm_tgx_c
-     real(kind=R_GRID), allocatable, dimension(:,:) ::  rnorm_tgy_c
-     real(kind=R_GRID), allocatable, dimension(:,:) ::  rnorm_tgx_d
-     real(kind=R_GRID), allocatable, dimension(:,:) ::  rnorm_tgy_d
-
-     ! local coordinates
-     real(kind=R_GRID), allocatable, dimension(:) :: line_a(:), line_b(:) 
-
-
-     ! dx, dy in cube coordinates
-     real(kind=R_GRID), allocatable, dimension(:) :: dxa_cs(:) , dya_cs(:)
-     real(kind=R_GRID), allocatable, dimension(:) ::  dx_cs(:) ,  dy_cs(:)
-     real(kind=R_GRID), allocatable, dimension(:) :: rdxa_cs(:), rdya_cs(:)
-     real(kind=R_GRID), allocatable, dimension(:) ::  rdx_cs(:),  rdy_cs(:)
-
 
      ! Scalars:
      real(kind=R_GRID), allocatable :: edge_s(:)
@@ -381,16 +235,6 @@ end type duogrid_type
      real, allocatable :: z12(:,:)
      real, allocatable :: z21(:,:)
      real, allocatable :: z22(:,:)
-
-     ! conversion matrices
-     real(kind=R_GRID), allocatable, dimension(:,:,:,:) :: c_l2contra
-     real(kind=R_GRID), allocatable, dimension(:,:,:,:) :: d_l2contra
-
-     real(kind=R_GRID), allocatable, dimension(:,:,:,:) :: c_l2covari
-     real(kind=R_GRID), allocatable, dimension(:,:,:,:) :: d_l2covari
-
-     real(kind=R_GRID), allocatable, dimension(:,:,:,:) :: c_contra2l
-     real(kind=R_GRID), allocatable, dimension(:,:,:,:) :: d_contra2l
 
 !    real, allocatable :: w00(:,:)
 
@@ -468,10 +312,7 @@ end type duogrid_type
      logical, pointer :: nested   !< Whether this is a nested grid. .false. by default.
      logical, pointer :: regional !< Is this a (stand-alone) limited area regional domain?
      logical :: bounded_domain !< Is this a regional or nested domain?
-     integer :: adv_scheme = 1 ! advection scheme
 
-     real :: m0
-     real :: mf
   end type fv_grid_type
 
   type fv_flags_type
@@ -748,10 +589,6 @@ end type duogrid_type
    logical :: adiabatic = .false. !< Run without physics (full or idealized).
 #endif
    logical :: duogrid = .false.     ! enable duo grid
-   integer :: duogrid_scheme
-   integer :: adv_scheme = 1 ! advection scheme
-   integer :: mass_fixer = 1 ! mass fixer (0-none; 1-flux average)
-   logical :: midpoint_cube = .false. ! reformulate midpoints using cube sphere mappings
 !-----------------------------------------------------------
 ! Grid shifting, rotation, and cube transformations:
 !-----------------------------------------------------------
@@ -1083,7 +920,6 @@ end type duogrid_type
    logical :: do_diss_est  = .false.     !< compute and save dissipation estimate
    logical :: ecmwf_ic = .false.   !< If external_ic = .true., reads initial conditions from ECMWF analyses.
                                    !< The default is .false.
-   logical :: use_gfsO3 = .false.     ! only work when "ecmwf_ic = .T.".
    logical :: gfs_phil = .false.      !< if .T., compute geopotential inside of GFS physics (not used?)
    logical :: agrid_vel_rst = .false.   !< Whether to write the unstaggered latitude-longitude winds
                                         !< (ua and va) to the restart files. This is useful for data
@@ -1103,7 +939,6 @@ end type duogrid_type
                                        !< from either the restart file (if restarting) or from the external initial
                                        !< condition file (if nggps_ic or ecwmf_ic are .true.). This overrides the
                                        !< hard-coded levels in fv_eta. The default is .false.
-   logical :: is_ideal_case = .true.    !< if .T., this is an ideal test case
    logical :: read_increment = .false.   !< read in analysis increment and add to restart
 ! Default restart files from the "Memphis" latlon FV core:
    character(len=128) :: res_latlon_dynamics = 'INPUT/fv_rst.res.nc'   !< If external_ic =.true.gives the filename of the
@@ -1407,8 +1242,7 @@ end type duogrid_type
   end type sg_diag_type
 
   type coarse_restart_type
-     real, _ALLOCATABLE :: u0(:,:,:)
-     real, _ALLOCATABLE :: v0(:,:,:)
+
      real, _ALLOCATABLE :: u(:,:,:)
      real, _ALLOCATABLE :: v(:,:,:)
      real, _ALLOCATABLE :: w(:,:,:)
@@ -1520,8 +1354,6 @@ end type duogrid_type
 !
 ! The C grid component is "diagnostic" in that it is predicted every time step
 ! from the D grid variables.
-    real, _ALLOCATABLE :: u0(:,:,:)   _NULL  !< initial (t=0) D grid zonal wind (m/s)
-    real, _ALLOCATABLE :: v0(:,:,:)   _NULL  !< initial (t=0) D grid meridional wind (m/s)
     real, _ALLOCATABLE :: u(:,:,:)    _NULL  !< D grid zonal wind (m/s)
     real, _ALLOCATABLE :: v(:,:,:)    _NULL  !< D grid meridional wind (m/s)
     real, _ALLOCATABLE :: pt(:,:,:)   _NULL  !< temperature (K)
@@ -1569,15 +1401,6 @@ end type duogrid_type
     real, _ALLOCATABLE :: va(:,:,:)     _NULL
     real, _ALLOCATABLE :: uc(:,:,:)     _NULL  ! (uc, vc) are mostly used as the C grid winds
     real, _ALLOCATABLE :: vc(:,:,:)     _NULL
-
-    real, _ALLOCATABLE :: uc_old(:,:,:)     _NULL  ! Time averaged C grid winds
-    real, _ALLOCATABLE :: vc_old(:,:,:)     _NULL
-
-    real, _ALLOCATABLE :: forcing_vc(:,:)     _NULL
-    real, _ALLOCATABLE :: forcing_uc(:,:)     _NULL
-    real, _ALLOCATABLE :: forcing_vd(:,:)     _NULL
-    real, _ALLOCATABLE :: forcing_ud(:,:)     _NULL
-    real, _ALLOCATABLE :: forcing_delp(:,:)     _NULL
 
     real, _ALLOCATABLE :: ak(:)  _NULL
     real, _ALLOCATABLE :: bk(:)  _NULL
@@ -1766,13 +1589,7 @@ contains
     Atm%ng => Atm%bd%ng
 
     Atm%flagstruct%ndims = ndims_in
-    if (Atm%flagstruct%is_ideal_case) then
-       allocate (   Atm%u0(isd:ied  ,jsd:jed+1,npz) )
-       allocate (   Atm%v0(isd:ied+1,jsd:jed  ,npz) )
-    else
-       allocate (   Atm%u0(isd:isd,jsd:jsd,1) )
-       allocate (   Atm%v0(isd:isd,jsd:jsd,1) )
-    endif
+
     allocate (    Atm%u(isd:ied  ,jsd:jed+1,npz) )
     allocate (    Atm%v(isd:ied+1,jsd:jed  ,npz) )
 
@@ -1810,17 +1627,6 @@ contains
     allocate (   Atm%va(isd:ied  ,jsd:jed  ,npz) )
     allocate (   Atm%uc(isd:ied+1,jsd:jed  ,npz) )
     allocate (   Atm%vc(isd:ied  ,jsd:jed+1,npz) )
-    allocate (   Atm%uc_old(isd:ied+1,jsd:jed  ,npz) )
-    allocate (   Atm%vc_old(isd:ied  ,jsd:jed+1,npz) )
-
-    allocate (   Atm%forcing_uc(isd:ied+1,jsd:jed  ) )
-    allocate (   Atm%forcing_vc(isd:ied  ,jsd:jed+1) )
-    allocate (   Atm%forcing_ud(isd:ied  ,jsd:jed+1) )
-    allocate (   Atm%forcing_vd(isd:ied+1,jsd:jed  ) )
-    allocate (   Atm%forcing_delp(isd:ied,jsd:jed) )
-
-
-
     ! For tracer transport:
     allocate ( Atm%mfx(is:ie+1, js:je,  npz) )
     allocate ( Atm%mfy(is:ie  , js:je+1,npz) )
@@ -1912,24 +1718,6 @@ contains
            do i=isd, ied
                Atm%u(i,j,k) = 0.
               Atm%vc(i,j,k) = real_big
-           enddo
-        enddo
-        do j=jsd, jed+1
-           do i=isd, ied
-              if (Atm%flagstruct%is_ideal_case) then
-                 Atm%u0(i,j,k) = 0.
-              endif
-               Atm%u(i,j,k) = 0.
-              Atm%vc(i,j,k) = real_big
-           enddo
-        enddo
-        do j=jsd, jed
-           do i=isd, ied+1
-              if (Atm%flagstruct%is_ideal_case) then
-                 Atm%v0(i,j,k) = 0.
-              endif
-               Atm%v(i,j,k) = 0.
-              Atm%uc(i,j,k) = real_big
            enddo
         enddo
         do j=jsd, jed
@@ -2046,52 +1834,11 @@ contains
     allocate ( Atm%gridstruct%grid_64 (isd_2d:ied_2d+1,jsd_2d:jed_2d+1,1:ndims_2d) )
     allocate ( Atm%gridstruct%agrid(isd_2d:ied_2d  ,jsd_2d:jed_2d  ,1:ndims_2d) )
     allocate ( Atm%gridstruct%agrid_64(isd_2d:ied_2d  ,jsd_2d:jed_2d  ,1:ndims_2d) )
-    allocate ( Atm%gridstruct%cgrid_64(isd_2d:ied_2d+1,jsd_2d:jed_2d  ,1:ndims_2d) )
-    allocate ( Atm%gridstruct%dgrid_64(isd_2d:ied_2d  ,jsd_2d:jed_2d+1,1:ndims_2d) )
     allocate ( Atm%gridstruct% sina(isd_2d:ied_2d+1,jsd_2d:jed_2d+1) )   ! SIN(angle of intersection)
     allocate ( Atm%gridstruct% sina_64(isd_2d:ied_2d+1,jsd_2d:jed_2d+1) )   ! SIN(angle of intersection)
     allocate ( Atm%gridstruct%rsina(is_2d:ie_2d+1,js_2d:je_2d+1) )      ! Why is the size different?
     allocate ( Atm%gridstruct% cosa(isd_2d:ied_2d+1,jsd_2d:jed_2d+1) )   ! COS(angle of intersection)
     allocate ( Atm%gridstruct% cosa_64(isd_2d:ied_2d+1,jsd_2d:jed_2d+1) )   ! COS(angle of intersection)
-
-
-    allocate ( Atm%gridstruct% line_a(isd_2d:ied_2d ) ) ! Cell Centered
-    allocate ( Atm%gridstruct% line_b(isd_2d:ied_2d+1 ) ) ! Cell Corners
-
-
-    allocate ( Atm%gridstruct% dxa_cs(isd_2d:ied_2d ) ) ! Cell Centered
-    allocate ( Atm%gridstruct%rdxa_cs(isd_2d:ied_2d ) ) ! Cell Centered
-    allocate ( Atm%gridstruct% dya_cs(jsd_2d:jed_2d ) ) ! Cell Centered
-    allocate ( Atm%gridstruct%rdya_cs(jsd_2d:jed_2d ) ) ! Cell Centered
- 
-    allocate ( Atm%gridstruct% dx_cs(isd_2d:ied_2d+1 ) ) ! Corner Centered
-    allocate ( Atm%gridstruct%rdx_cs(isd_2d:ied_2d+1 ) ) ! Corner Centered
-    allocate ( Atm%gridstruct% dy_cs(jsd_2d:jed_2d+1 ) ) ! Corner Centered
-    allocate ( Atm%gridstruct%rdy_cs(jsd_2d:jed_2d+1 ) ) ! Corner Centered
- 
-
-    allocate ( Atm%gridstruct% metricterm_a(isd_2d:ied_2d  ,  jsd_2d:jed_2d  ) )
-    allocate ( Atm%gridstruct%rmetricterm_a(isd_2d:ied_2d  ,  jsd_2d:jed_2d  ) )
-    allocate ( Atm%gridstruct% metricterm_b(isd_2d:ied_2d+1,  jsd_2d:jed_2d+1) )
-    allocate ( Atm%gridstruct%rmetricterm_b(isd_2d:ied_2d+1,  jsd_2d:jed_2d+1) )
-
-
-    allocate ( Atm%gridstruct% metricterm_c(isd_2d:ied_2d+1,  jsd_2d:jed_2d  ) )
-    allocate ( Atm%gridstruct% metricterm_d(isd_2d:ied_2d  ,  jsd_2d:jed_2d+1) )
-
-    allocate ( Atm%gridstruct% norm_tgx_b(isd_2d:ied_2d+1,  jsd_2d:jed_2d+1) )
-    allocate ( Atm%gridstruct% norm_tgy_b(isd_2d:ied_2d+1,  jsd_2d:jed_2d+1) )
-    allocate ( Atm%gridstruct% norm_tgx_c(isd_2d:ied_2d+1,  jsd_2d:jed_2d  ) )
-    allocate ( Atm%gridstruct% norm_tgy_c(isd_2d:ied_2d+1,  jsd_2d:jed_2d  ) )
-    allocate ( Atm%gridstruct% norm_tgx_d(isd_2d:ied_2d  ,  jsd_2d:jed_2d+1) )
-    allocate ( Atm%gridstruct% norm_tgy_d(isd_2d:ied_2d  ,  jsd_2d:jed_2d+1) )
-
-    allocate ( Atm%gridstruct%rnorm_tgx_b(isd_2d:ied_2d+1,  jsd_2d:jed_2d+1) )
-    allocate ( Atm%gridstruct%rnorm_tgy_b(isd_2d:ied_2d+1,  jsd_2d:jed_2d+1) )
-    allocate ( Atm%gridstruct%rnorm_tgx_c(isd_2d:ied_2d+1,  jsd_2d:jed_2d  ) )
-    allocate ( Atm%gridstruct%rnorm_tgy_c(isd_2d:ied_2d+1,  jsd_2d:jed_2d  ) )
-    allocate ( Atm%gridstruct%rnorm_tgx_d(isd_2d:ied_2d  ,  jsd_2d:jed_2d+1) )
-    allocate ( Atm%gridstruct%rnorm_tgy_d(isd_2d:ied_2d  ,  jsd_2d:jed_2d+1) )
 
     allocate ( Atm%gridstruct%  e1(3,isd_2d:ied_2d+1,jsd_2d:jed_2d+1) )
     allocate ( Atm%gridstruct%  e2(3,isd_2d:ied_2d+1,jsd_2d:jed_2d+1) )
@@ -2173,15 +1920,7 @@ contains
 
     allocate (  Atm%gridstruct%rsin2(isd_2d:ied_2d,jsd_2d:jed_2d) )    ! cell center
 
-    allocate ( Atm%gridstruct%c_l2contra(1:2, 1:2, isd_2d:ied_2d+1,jsd_2d:jed_2d) )
-    allocate ( Atm%gridstruct%d_l2contra(1:2, 1:2, isd_2d:ied_2d  ,jsd_2d:jed_2d+1) )
 
-    allocate ( Atm%gridstruct%c_l2covari(1:2, 1:2, isd_2d:ied_2d+1,jsd_2d:jed_2d) )
-    allocate ( Atm%gridstruct%d_l2covari(1:2, 1:2, isd_2d:ied_2d  ,jsd_2d:jed_2d+1) )
-
-    allocate ( Atm%gridstruct%c_contra2l(1:2, 1:2, isd_2d:ied_2d+1,jsd_2d:jed_2d  ) )
-    allocate ( Atm%gridstruct%d_contra2l(1:2, 1:2, isd_2d:ied_2d  ,jsd_2d:jed_2d+1) )
- 
     ! Super (composite) grid:
 
     !     9---4---8
@@ -2279,8 +2018,6 @@ contains
     integer :: n
 
     if (.not.Atm%allocated) return
-    deallocate (   Atm%u0 )
-    deallocate (   Atm%v0 )
     deallocate (    Atm%u )
     deallocate (    Atm%v )
     deallocate (   Atm%pt )
@@ -2299,15 +2036,6 @@ contains
     deallocate (   Atm%va )
     deallocate (   Atm%uc )
     deallocate (   Atm%vc )
-    deallocate (   Atm%uc_old )
-    deallocate (   Atm%vc_old )
-
-    deallocate (   Atm%forcing_uc)
-    deallocate (   Atm%forcing_vc)
-    deallocate (   Atm%forcing_ud)
-    deallocate (   Atm%forcing_vd)
-    deallocate (   Atm%forcing_delp)
-
     deallocate ( Atm%mfx )
     deallocate ( Atm%mfy )
     deallocate (  Atm%cx )
@@ -2369,20 +2097,6 @@ contains
     deallocate ( Atm%gridstruct% area )   ! Cell Centered
     deallocate ( Atm%gridstruct%rarea )   ! Cell Centered
 
-    deallocate ( Atm%gridstruct%line_a )  ! Cell Centered
-    deallocate ( Atm%gridstruct%line_b )  ! Cell Corners
-
-    deallocate ( Atm%gridstruct% dxa_cs) ! Cell Centered
-    deallocate ( Atm%gridstruct%rdxa_cs) ! Cell Centered
-    deallocate ( Atm%gridstruct% dya_cs) ! Cell Centered
-    deallocate ( Atm%gridstruct%rdya_cs) ! Cell Centered
- 
-    deallocate ( Atm%gridstruct% dx_cs) ! Corner Centered
-    deallocate ( Atm%gridstruct%rdx_cs) ! Corner Centered
-    deallocate ( Atm%gridstruct% dy_cs) ! Corner Centered
-    deallocate ( Atm%gridstruct%rdy_cs) ! Corner Centered
- 
-
     deallocate ( Atm%gridstruct% area_c )  ! Cell Corners
     deallocate ( Atm%gridstruct%rarea_c )  ! Cell Corners
 
@@ -2410,22 +2124,7 @@ contains
     deallocate ( Atm%gridstruct%  e2 )
 
 
-    deallocate ( Atm%gridstruct% metricterm_a )
-    deallocate ( Atm%gridstruct%rmetricterm_a )
 
-    deallocate ( Atm%gridstruct% metricterm_b )
-    deallocate ( Atm%gridstruct%rmetricterm_b )
-
-    deallocate ( Atm%gridstruct% metricterm_c )
-    deallocate ( Atm%gridstruct% metricterm_d )
-
-    deallocate ( Atm%gridstruct% norm_tgx_b)
-    deallocate ( Atm%gridstruct% norm_tgx_c)
-    deallocate ( Atm%gridstruct% norm_tgy_d)
- 
-    deallocate ( Atm%gridstruct%rnorm_tgx_b)
-    deallocate ( Atm%gridstruct%rnorm_tgx_c)
-    deallocate ( Atm%gridstruct%rnorm_tgy_d)
 
     deallocate (Atm%gridstruct%iinta, &
          Atm%gridstruct%jinta,  &
@@ -2498,15 +2197,6 @@ contains
 
     deallocate (  Atm%gridstruct%rsin2 )    ! cell center
 
-
-    deallocate (  Atm%gridstruct%c_l2contra )
-    deallocate (  Atm%gridstruct%d_l2contra )
-
-    deallocate (  Atm%gridstruct%c_l2covari )
-    deallocate (  Atm%gridstruct%d_l2covari )
-
-    deallocate (  Atm%gridstruct%c_contra2l )
-    deallocate (  Atm%gridstruct%d_contra2l )
 
     ! Super (composite) grid:
 

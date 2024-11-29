@@ -29,9 +29,7 @@
                                    mp_stop, mp_reduce_sum, mp_reduce_max, mp_gather
       use fv_grid_utils_mod, only: cubed_to_latlon, great_circle_dist, mid_pt_sphere,    &
                                    ptop_min, inner_prod, get_latlon_vector, get_unit_vect2, &
-                                   g_sum, latlon2xyz, cart_to_latlon, make_eta_level, f_p, project_sphere_v, &
-                                   compute_conversion_matrices
-
+                                   g_sum, latlon2xyz, cart_to_latlon, make_eta_level, f_p, project_sphere_v
       use fv_surf_map_mod,   only: surfdrv
 
       use fv_grid_tools_mod, only: todeg, missing, spherical_to_cartesian
@@ -39,14 +37,14 @@
                                    hybrid_z_dz
       use duogrid_mod,        only: ext_scalar, ext_vector
 
-      use mpp_mod,           only: mpp_error, FATAL, mpp_root_pe, mpp_broadcast, mpp_sum, mpp_sync, mpp_send, mpp_recv, mpp_npes
+      use mpp_mod,           only: mpp_error, FATAL, mpp_root_pe, mpp_broadcast, mpp_sum, mpp_sync
       use mpp_mod,           only: stdlog, input_nml_file
       use fms_mod,           only: check_nml_error
       use mpp_domains_mod,   only: mpp_update_domains, domain2d
       use mpp_parameter_mod, only: AGRID_PARAM=>AGRID,CGRID_NE_PARAM=>CGRID_NE, &
                                    SCALAR_PAIR
       use gfdl_mp_mod,       only: mqs3d
-      use fv_diagnostics_mod, only: prt_maxmin, ppme, eqv_pot, qcly0
+      use fv_diagnostics_mod, only: prt_maxmin, ppme, eqv_pot, qcly0, is_ideal_case
       use mpp_mod,            only: mpp_pe, mpp_chksum, stdout
       use fv_arrays_mod,         only: fv_grid_type, fv_flags_type, fv_grid_bounds_type, R_GRID
       use tracer_manager_mod,    only: get_tracer_index
@@ -149,7 +147,6 @@
       integer, parameter :: initWindsCase5 = 5
       integer, parameter :: initWindsCase6 =-1
       integer, parameter :: initWindsCase9 =-1
-      integer, parameter :: initWindsCase7 = 7
 
       real, allocatable, dimension(:) :: pz0, zz0
 
@@ -183,8 +180,7 @@
       public :: pz0, zz0
       public :: read_namelist_test_case_nml, alpha, test_case
       public :: init_case
-      public :: case9_forcing1, case9_forcing2, case51_forcing, wind_NL2010, error_adv_zonal, error_density, error_divwind110
-      public :: case110_forcing_cgrid, case110_forcing_dgrid
+      public :: case9_forcing1, case9_forcing2, case51_forcing
       public :: init_double_periodic
       public :: checker_tracers
       public :: radius, omega, small_earth_scale
@@ -218,14 +214,13 @@
       integer,      intent(IN) :: ndims
       integer,      intent(IN) :: nregions
       logical,      intent(IN) :: bounded_domain
-      type(fv_flags_type), target, intent(INOUT) :: flagstruct
+      type(fv_flags_type), target, intent(IN) :: flagstruct
       type(fv_grid_type), intent(INOUT), target :: gridstruct
       type(domain2d), intent(INOUT) :: domain
       integer, intent(IN)  :: tile
 
       real(kind=R_GRID) :: p1(2), p2(2), p3(2), p4(2), pt(2)
       real(kind=R_GRID) :: e1(3), e2(3), ex(3), ey(3)
-      real(kind=R_GRID) :: lat, lon
 
       real   :: dist, r, r0
       integer :: i,j,k,n
@@ -235,8 +230,6 @@
       integer :: is2, ie2, js2, je2
 
       real(kind=R_GRID), pointer, dimension(:,:,:)   :: agrid, grid
-      real(kind=R_GRID), pointer, dimension(:,:,:)   :: cgrid, dgrid
-      real(kind=R_GRID), pointer, dimension(:,:,:,:) :: c_l2contra, d_l2contra
       real, pointer, dimension(:,:)     :: area, rarea, fC, f0
       real(kind=R_GRID), pointer, dimension(:,:,:)   :: ee1, ee2, en1, en2
       real(kind=R_GRID), pointer, dimension(:,:,:,:) :: ew, es
@@ -254,11 +247,6 @@
 
       grid => gridstruct%grid_64
       agrid=> gridstruct%agrid_64
-      cgrid => gridstruct%cgrid_64
-      dgrid => gridstruct%dgrid_64
-
-      c_l2contra => gridstruct%c_l2contra
-      d_l2contra => gridstruct%d_l2contra
 
       area  => gridstruct%area
       rarea => gridstruct%rarea
@@ -545,43 +533,6 @@
          endif
          call dtoa( u, v,ua,va,dx,dy,dxa,dya,dxc,dyc,npx,npy,ng, bd)
          call atoc(ua,va,uc,vc,dx,dy,dxa,dya,npx,npy,ng, bounded_domain, domain, bd, gridstruct, flagstruct)
-     elseif (defOnGrid==7) then
-         call compute_conversion_matrices(bd, gridstruct)
-         if(test_case==-5 .or. test_case==-6 .or. test_case==-8 .or. test_case==-9) then 
-            call wind_NL2010(bd, uc, vc, u, v, flagstruct, gridstruct, domain, 0.d0)
-         else 
-            ! cgrid winds
-            do i = is-1, ie+1+1
-               do j = jsd, jed
-                  lon = cgrid(i,j,1)
-                  lat = cgrid(i,j,2)
-                  utmp =  Ubar*(DCOS(lat)*DCOS(alpha) + DSIN(lat)*DCOS(lon)*DSIN(alpha) )
-                  vtmp = -Ubar * DSIN(lon)*DSIN(alpha)
-                  uc(i,j) = c_l2contra(1,1,i,j)*utmp + c_l2contra(1,2,i,j)*vtmp
-                  v (i,j) = c_l2contra(2,1,i,j)*utmp + c_l2contra(2,2,i,j)*vtmp
-               enddo
-            enddo
-
-            ! dgrid winds
-            do i = isd, ied
-               do j = js-1, je+1+1
-                  lon = dgrid(i,j,1)
-                  lat = dgrid(i,j,2)
-                  utmp =  Ubar*(DCOS(lat)*DCOS(alpha) + DSIN(lat)*DCOS(lon)*DSIN(alpha) )
-                  vtmp = -Ubar * DSIN(lon)*DSIN(alpha)
-                  vc(i,j) = d_l2contra(2,1,i,j)*utmp + d_l2contra(2,2,i,j)*vtmp
-                  u (i,j) = d_l2contra(1,1,i,j)*utmp + d_l2contra(1,2,i,j)*vtmp
-               enddo
-            enddo
-            if (.not. gridstruct%dg%is_initialized) then
-               call mpp_update_domains( uc, vc, domain, gridtype=CGRID_NE_PARAM)
-               call fill_corners(uc, vc, npx, npy, VECTOR=.true., CGRID=.true.)
-            else
-            !   call ext_vector(uc, vc, gridstruct%dg, bd, domain,gridstruct, flagstruct,1,0,0,1)
-            endif
-         endif
-
-
      else
          !print*, 'Choose an appropriate grid to define the winds on'
          !stop
@@ -603,7 +554,6 @@
 !                  case 9 (Stratospheric Vortex Breaking Case)
 !
       subroutine init_case(u,v,w,pt,delp,q,phis, ps,pe,peln,pk,pkz,  uc,vc, ua,va, ak, bk,  &
-                           forcing_uc, forcing_vc, forcing_ud, forcing_vd, forcing_delp, &
                            gridstruct, flagstruct, npx, npy, npz, ng, ncnst, nwat, ndims, nregions,        &
                            dry_mass, mountain, moist_phys, hydrostatic, hybrid_z, delz, ze0, adiabatic, &
                            ks, npx_global, ptop, domain_in, tile_in, bd)
@@ -631,12 +581,6 @@
       real ,      intent(inout) :: delz(bd%is:,bd%js:,1:)
       real ,      intent(inout)   ::  ze0(bd%is:,bd%js:,1:)
 
-      real ,      intent(INOUT) ::  forcing_uc(bd%isd:bd%ied+1,bd%jsd:bd%jed  )
-      real ,      intent(INOUT) ::  forcing_vc(bd%isd:bd%ied  ,bd%jsd:bd%jed+1)
-      real ,      intent(INOUT) ::  forcing_ud(bd%isd:bd%ied  ,bd%jsd:bd%jed+1)
-      real ,      intent(INOUT) ::  forcing_vd(bd%isd:bd%ied+1,bd%jsd:bd%jed  )
-      real ,      intent(INOUT) ::  forcing_delp(bd%isd:bd%ied  ,bd%jsd:bd%jed)
- 
       real ,      intent(inout) ::   ak(npz+1)
       real ,      intent(inout) ::   bk(npz+1)
 
@@ -654,7 +598,7 @@
       integer,      intent(IN) :: ks
 
       type(fv_grid_type), target :: gridstruct
-      type(fv_flags_type), target, intent(INOUT) :: flagstruct
+      type(fv_flags_type), target, intent(IN) :: flagstruct
 
       integer, intent(IN) :: npx_global
       integer, intent(IN), target :: tile_in
@@ -765,111 +709,22 @@
       real ::   pe_v(bd%is:bd%ie+1,npz+1,bd%js:bd%je)
       real ::   ps_u(bd%is:bd%ie,bd%js:bd%je+1)
       real ::   ps_v(bd%is:bd%ie+1,bd%js:bd%je)
-      ! winds - A grid
-      real(kind=R_GRID) :: ula(bd%isd:bd%ied, bd%jsd:bd%jed, npz)
-      real(kind=R_GRID) :: vla(bd%isd:bd%ied, bd%jsd:bd%jed, npz)
-      real(kind=R_GRID) :: ula_ref(bd%isd:bd%ied, bd%jsd:bd%jed, npz)
-      real(kind=R_GRID) :: vla_ref(bd%isd:bd%ied, bd%jsd:bd%jed, npz)
 
-      real(kind=R_GRID) :: ua_ref(bd%isd:bd%ied, bd%jsd:bd%jed, npz)
-      real(kind=R_GRID) :: va_ref(bd%isd:bd%ied, bd%jsd:bd%jed, npz)
-
-      ! winds - C/D-grid
-      real(kind=R_GRID) :: ulc(bd%isd:bd%ied+1, bd%jsd:bd%jed, npz)
-      real(kind=R_GRID) :: vld(bd%isd:bd%ied+1, bd%jsd:bd%jed, npz)
-
-      real(kind=R_GRID) :: uld(bd%isd:bd%ied, bd%jsd:bd%jed+1, npz)
-      real(kind=R_GRID) :: vlc(bd%isd:bd%ied, bd%jsd:bd%jed+1, npz)
-
-      real(kind=R_GRID) :: ulc_ref(bd%isd:bd%ied+1, bd%jsd:bd%jed, npz)
-      real(kind=R_GRID) :: vld_ref(bd%isd:bd%ied+1, bd%jsd:bd%jed, npz)
-
-      real(kind=R_GRID) :: uld_ref(bd%isd:bd%ied, bd%jsd:bd%jed+1, npz)
-      real(kind=R_GRID) :: vlc_ref(bd%isd:bd%ied, bd%jsd:bd%jed+1, npz)
-
-      real(kind=R_GRID) :: uc_ref(bd%isd:bd%ied+1, bd%jsd:bd%jed, npz)
-      real(kind=R_GRID) :: vd_ref(bd%isd:bd%ied+1, bd%jsd:bd%jed, npz)
-
-      real(kind=R_GRID) :: ud_ref(bd%isd:bd%ied, bd%jsd:bd%jed+1, npz)
-      real(kind=R_GRID) :: vc_ref(bd%isd:bd%ied, bd%jsd:bd%jed+1, npz)
-
-      real(kind=R_GRID) :: ud(bd%isd:bd%ied, bd%jsd:bd%jed+1, npz)
-      real(kind=R_GRID) :: vd(bd%isd:bd%ied+1, bd%jsd:bd%jed, npz)
-
-      real(kind=R_GRID) :: field4d(bd%isd:bd%ied, bd%jsd:bd%jed, npz, 1)
-      real(kind=R_GRID) :: field3d(bd%isd:bd%ied, bd%jsd:bd%jed, npz)
-      real(kind=R_GRID) :: field2d(bd%isd:bd%ied, bd%jsd:bd%jed)
-
-      real(kind=R_GRID) :: field3d_b(bd%isd:bd%ied+1, bd%jsd:bd%jed+1, npz)
-      real(kind=R_GRID) :: ulb_ref(bd%isd:bd%ied+1, bd%jsd:bd%jed+1, npz)
-      real(kind=R_GRID) :: vlb_ref(bd%isd:bd%ied+1, bd%jsd:bd%jed+1, npz)
-
-      real(kind=R_GRID) :: ub_ref(bd%isd:bd%ied+1, bd%jsd:bd%jed+1, npz)
-      real(kind=R_GRID) :: vb_ref(bd%isd:bd%ied+1, bd%jsd:bd%jed+1, npz)
-
-
-      real(kind=R_GRID) :: phis_b(bd%isd:bd%ied+1, bd%jsd:bd%jed+1, npz)
-
-      real(kind=R_GRID) :: phis_c(bd%is:bd%ie+1, bd%js:bd%je)
-      real(kind=R_GRID) :: phis_x_L(bd%is:bd%ie, bd%js:bd%je)
-      real(kind=R_GRID) :: phis_x_R(bd%is:bd%ie, bd%js:bd%je)
-
-      real(kind=R_GRID) :: phis_d(bd%is:bd%ie, bd%js:bd%je+1)
-      real(kind=R_GRID) :: phis_y_L(bd%is:bd%ie, bd%js:bd%je)
-      real(kind=R_GRID) :: phis_y_R(bd%is:bd%ie, bd%js:bd%je)
-
-      real(kind=R_GRID) :: phis_error(bd%is:bd%ie, bd%js:bd%je)
-      real(kind=R_GRID) :: a11, a12, a21, a22
 
       real :: dz, zetam
 
       real(kind=R_GRID), pointer, dimension(:,:,:)   :: agrid, grid
-      real(kind=R_GRID), pointer, dimension(:,:,:)   :: cgrid, dgrid
       real(kind=R_GRID), pointer, dimension(:,:)     :: area
-      real(kind=R_GRID), pointer, dimension(:,:,:,:) :: c_l2covari, d_l2covari
       real, pointer, dimension(:,:)     :: rarea, fC, f0
       real(kind=R_GRID), pointer, dimension(:,:,:)   :: ee1, ee2, en1, en2
       real(kind=R_GRID), pointer, dimension(:,:,:,:) :: ew, es
       real, pointer, dimension(:,:)     :: dx,dy, dxa,dya, rdxa, rdya, dxc,dyc
-      real(kind=R_GRID) :: lat, lon
-      real(kind=R_GRID) :: u_forcing, v_forcing, phi_forcing
-      real(kind=R_GRID) :: error_ha(1), error_hb(1), error_Ua(1), error_Uc(1), error_Ud(1)
-      real(kind=R_GRID), allocatable :: errors_ha(:), errors_hb(:), errors_Ua(:), errors_Uc(:), errors_Ud(:)
-      logical, pointer :: cubed_sphere, latlon
 
-      !Galewiski test case
-      integer:: jy
-      integer:: nygg
-      real:: u00
-      real:: alpha0
-      real:: clat
-      real, allocatable :: psigg(:)
-      real:: l1
-      real:: l2
-      real:: lat1
-      real:: lat2
-      real:: en
-      real:: umen
-      real:: dygg
-      real:: beta
-      real:: totvol
-      real:: totarea
-      real:: den
-      real:: cc1
-      real:: cc2
-      real:: cc3
-      real:: cc4
-      real:: u_1
-      real:: u_2
-      real:: e_1 
-      real:: e_2
-      real:: hpert
-      real:: long
+      logical, pointer :: cubed_sphere, latlon
 
       type(domain2d), pointer :: domain
       integer, pointer :: tile
-      integer :: master, nprocs
-      character (len=128):: filename_dg ! dg test filename output
+
       logical, pointer :: have_south_pole, have_north_pole
 
       integer, pointer :: ntiles_g
@@ -877,10 +732,6 @@
 
       integer :: is, ie, js, je
       integer :: isd, ied, jsd, jed
-      integer :: hord
-      character (len=60):: panel
-      character (len=60):: hordname
-      character (len=60):: ppmfilename
 
       is  = bd%is
       ie  = bd%ie
@@ -893,8 +744,6 @@
 
       grid => gridstruct%grid_64
       agrid=> gridstruct%agrid_64
-      cgrid=> gridstruct%cgrid_64
-      dgrid=> gridstruct%dgrid_64
 
       area  => gridstruct%area_64
       rarea => gridstruct%rarea
@@ -931,9 +780,6 @@
       acapN                         => gridstruct%acapN
       acapS                         => gridstruct%acapS
       globalarea                    => gridstruct%globalarea
-
-      c_l2covari => gridstruct%c_l2covari
-      d_l2covari => gridstruct%d_l2covari
 
       if (gridstruct%bounded_domain) then
          is2 = isd
@@ -979,292 +825,7 @@
 
 #if defined(SW_DYNAMICS)
       select case (test_case)
-      case(-10)
-         Ubar = (2.0*pi*radius)/(12.0*86400.0)
-         gh0  = 2.94e4
- 
-         ! compute exact field in all agrid points
-         do j=js,je
-            do i=is,ie
-               lon = agrid(i,j,1)
-               lat = agrid(i,j,2)
-               field3d(i,j,1) = gh0 - (radius*omega*Ubar + (Ubar*Ubar)/2.) * &
-                             ( -1.*dcos(lon)*dcos(lat)*dsin(alpha) + &
-                                   dsin(lat)*dcos(alpha) ) ** 2.0
-            enddo
-         enddo
-
-         if (.not. gridstruct%dg%is_initialized) then
-           call mpp_update_domains(field3d,domain)
-         else
-           call ext_scalar(field3d, gridstruct%dg, bd, domain, 0, 0)
-         endif
-
-
-         ! compute exact field in all cgrid points
-         do j=js,je
-            do i=is,ie+1
-               lon = cgrid(i,j,1)
-               lat = cgrid(i,j,2)
-               phis_c(i,j) = gh0 - (radius*omega*Ubar + (Ubar*Ubar)/2.) * &
-                             ( -1.*dcos(lon)*dcos(lat)*dsin(alpha) + &
-                                   dsin(lat)*dcos(alpha) ) ** 2.0
-            enddo
-         enddo
-
-         ! compute exact field in all dgrid points
-         do j=js,je+1
-            do i=is,ie
-               lon = dgrid(i,j,1)
-               lat = dgrid(i,j,2)
-               phis_d(i,j) = gh0 - (radius*omega*Ubar + (Ubar*Ubar)/2.) * &
-                             ( -1.*dcos(lon)*dcos(lat)*dsin(alpha) + &
-                                   dsin(lat)*dcos(alpha) ) ** 2.0
-            enddo
-         enddo
-
-         hord = flagstruct%hord_tr
-         call xppm(phis_x_L, phis_x_R, field3d, hord, is,ie,isd,ied, je,js,jsd,jed, npx, npy, &
-         gridstruct%dxa, gridstruct%bounded_domain, gridstruct%grid_type)
-         call yppm(phis_y_L, phis_y_R, field3d, hord, is,ie,isd,ied, js,je,jsd,jed, npx, npy, &
-         gridstruct%dya, gridstruct%bounded_domain, gridstruct%grid_type)
-
-         do j = js, je
-            do i = is, ie
-               phis_error(i,j) = max( &
-               abs(phis_x_L(i,j)-phis_c(i  ,j  ))/abs(phis_c(i,j)), &
-               abs(phis_x_R(i,j)-phis_c(i+1,j  ))/abs(phis_c(i,j)), &
-               abs(phis_y_L(i,j)-phis_d(i  ,j  ))/abs(phis_d(i,j)), &
-               abs(phis_y_R(i,j)-phis_d(i  ,j+1))/abs(phis_d(i,j)))
-            enddo
-         enddo
-         print*, maxval(abs(phis_error))
-
-         write(panel, '(i8)') mpp_pe()+1
-         write(hordname, '(i8)') hord
-         ppmfilename= "error_ppm_hord"//trim(adjustl(hordname))//"_"//trim(adjustl(panel))//".dat"
-         !print*, ppmfilename
-         ! open the file
-         open(21, file=ppmfilename, status='replace', access='stream', form='unformatted')
-         write(21) phis_error(is:ie,js:je)
-         close(21)
-
-         ppmfilename= "lon_"//trim(adjustl(panel))//".dat"
-         open(25, file=ppmfilename, status='replace', access='stream', form='unformatted')
-         write(25) grid(is:ie+1,js:je+1,1)
-         close(25)
-
-         ppmfilename= "lat_"//trim(adjustl(panel))//".dat"
-         open(31, file=ppmfilename, status='replace', access='stream', form='unformatted')
-         write(31) grid(is:ie+1,js:je+1,2)
-         close(31)
-         ! save scalar field in binary format
-         !filename = trim(griddir)//trim(atm%grid_name)//"_face"//trim(adjustl(panel))//"_lon.dat"
-         !print*, 'saving ', filename
-
-         !Write whole block to file (much faster)
-         !open(iunit, file=filename, status='replace', access='stream', form='unformatted')
-         !write(iunit) atm%gridstruct%bgrid(is:ie+1,js:je+1,p)%lon
-         !close(iunit)
-
-         stop
-
       case(-2)
-         Ubar = (2.0*pi*radius)/(12.0*86400.0)
-         gh0  = 2.94e4
-         phis = 0.0
-         ! compute exact field in all agrid points
-         do j=jsd,jed
-            do i=isd,ied
-               lon = agrid(i,j,1)
-               lat = agrid(i,j,2)
-               !delp(i,j,1) = gh0 - (radius*omega*Ubar + (Ubar*Ubar)/2.) * &
-               phis(i,j) = gh0 - (radius*omega*Ubar + (Ubar*Ubar)/2.) * &
-                             ( -1.*dcos(lon)*dcos(lat)*dsin(alpha) + &
-                                   dsin(lat)*dcos(alpha) ) ** 2.0
-               ula_ref(i,j,:)  =  Ubar*(dcos(lat)*dcos(alpha) + dsin(lat)*dcos(lon)*dsin(alpha))
-               vla_ref(i,j,:)  = -Ubar*dsin(lon)*dsin(alpha)
-
-               ! convert from latlon to cs
-               ua_ref(i,j,:)  = gridstruct%dg%a_l2c(1,1,i,j)*ula_ref(i,j,:) + gridstruct%dg%a_l2c(1,2,i,j)*vla_ref(i,j,:)
-               va_ref(i,j,:)  = gridstruct%dg%a_l2c(2,1,i,j)*ula_ref(i,j,:) + gridstruct%dg%a_l2c(2,2,i,j)*vla_ref(i,j,:)
-            enddo
-         enddo
-
-         ! compute exact field in all bgrid points
-         do j=jsd,jed+1
-            do i=isd,ied+1
-               lon = grid(i,j,1)
-               lat = grid(i,j,2)
-               !delp(i,j,1) = gh0 - (radius*omega*Ubar + (Ubar*Ubar)/2.) * &
-               phis_b(i,j,:) = gh0 - (radius*omega*Ubar + (Ubar*Ubar)/2.) * &
-                             ( -1.*dcos(lon)*dcos(lat)*dsin(alpha) + &
-                                   dsin(lat)*dcos(alpha) ) ** 2.0
-               ulb_ref(i,j,:)  =  Ubar*(dcos(lat)*dcos(alpha) + dsin(lat)*dcos(lon)*dsin(alpha))
-               vlb_ref(i,j,:)  = -Ubar*dsin(lon)*dsin(alpha)
-
-               ! convert from latlon to cs
-               ub_ref(i,j,:)  = gridstruct%dg%b_l2c(1,1,i,j)*ulb_ref(i,j,:) + gridstruct%dg%b_l2c(1,2,i,j)*vlb_ref(i,j,:)
-               vb_ref(i,j,:)  = gridstruct%dg%b_l2c(2,1,i,j)*ulb_ref(i,j,:) + gridstruct%dg%b_l2c(2,2,i,j)*vlb_ref(i,j,:)
-            enddo
-         enddo
-
-         ! compute exact velocity in all c-grid points
-         do j=jsd,jed
-            do i=isd,ied+1
-               lon = cgrid(i,j,1)
-               lat = cgrid(i,j,2)
-               ulc_ref(i,j,:)  =  Ubar*(dcos(lat)*dcos(alpha) + dsin(lat)*dcos(lon)*dsin(alpha))
-               vld_ref(i,j,:)  = -Ubar*dsin(lon)*dsin(alpha)
-
-               ! convert from latlon to cs
-               uc_ref(i,j,:)  = gridstruct%dg%c_l2c(1,1,i,j)*ulc_ref(i,j,:) + gridstruct%dg%c_l2c(1,2,i,j)*vld_ref(i,j,:)
-               vd_ref(i,j,:)  = gridstruct%dg%c_l2c(2,1,i,j)*ulc_ref(i,j,:) + gridstruct%dg%c_l2c(2,2,i,j)*vld_ref(i,j,:)
-            enddo
-         enddo
-
-         ! compute exact velocity in all d-grid points
-         do j=jsd,jed+1
-            do i=isd,ied
-               lon = dgrid(i,j,1)
-               lat = dgrid(i,j,2)
-               uld_ref(i,j,:)  =  Ubar*(dcos(lat)*dcos(alpha) + dsin(lat)*dcos(lon)*dsin(alpha))
-               vlc_ref(i,j,:)  = -Ubar*dsin(lon)*dsin(alpha)
-
-               ! convert from latlon to cs
-               ud_ref(i,j,:)  = gridstruct%dg%d_l2c(1,1,i,j)*uld_ref(i,j,:) + gridstruct%dg%d_l2c(1,2,i,j)*vlc_ref(i,j,:)
-               vc_ref(i,j,:)  = gridstruct%dg%d_l2c(2,1,i,j)*uld_ref(i,j,:) + gridstruct%dg%d_l2c(2,2,i,j)*vlc_ref(i,j,:)
-            enddo
-         enddo
-
-         ! compute exact field only at interior agrid points
-         delp(is:ie,js:je,1)      = phis(is:ie,js:je)
-         field4d(is:ie,js:je,1,1) = phis(is:ie,js:je)
-         field3d(is:ie,js:je,1)   = phis(is:ie,js:je)
-         ula (is:ie,js:je,:) = ula_ref(is:ie,js:je,:)
-         vla (is:ie,js:je,:) = vla_ref(is:ie,js:je,:)
-         ua  (is:ie,js:je,:) = ua_ref (is:ie,js:je,:)
-         va  (is:ie,js:je,:) = va_ref (is:ie,js:je,:)
-
-         field3d_b(is:ie+1,js:je+1,:)  = phis_b(is:ie+1,js:je+1,:)
-
-         ! C grid wind
-         uc(is:ie+1,js:je  ,:) = uc_ref(is:ie+1,js:je  ,:)
-         vc(is:ie  ,js:je+1,:) = vc_ref(is:ie  ,js:je+1,:)
-
-         ! D grid wind
-         ud(is:ie  ,js:je+1,:) = ud_ref(is:ie  ,js:je+1,:)
-         vd(is:ie+1,js:je  ,:) = vd_ref(is:ie+1,js:je  ,:)
-
-         ! does the duogrid interpolation
-         call ext_scalar(field3d, gridstruct%dg, bd, domain, 0, 0)
-         call ext_scalar(field4d, gridstruct%dg, bd, domain, 0, 0)
-
-         error_ha(1) = maxval(abs(phis(:,:)-field4d(:,:,1,1)))/maxval(abs(phis(:,:)))
-         error_ha(1) = max(error_ha(1), maxval(abs(phis(:,:)-field3d(:,:,1)))/maxval(abs(phis(:,:))))
-
-         ! scalar field interpolation for B grid grid
-         call ext_scalar(field3d_b, gridstruct%dg, bd, domain, 1, 1)
-         error_hb(1) = maxval(abs(phis_b(:,:,1)-field3d_b(:,:,1)))/maxval(abs(phis_b(:,:,1)))
- 
-         ! wind interpolation for A grid
-         call ext_vector(ua, va, gridstruct%dg, bd, domain, gridstruct, flagstruct,0,0,0,0)
-         error_Ua(1) = max(maxval(abs(ua(:,:,:)-ua_ref(:,:,:)))/maxval(abs(ua_ref(:,:,:))), &
-                           maxval(abs(va(:,:,:)-va_ref(:,:,:)))/maxval(abs(va_ref(:,:,:))))
-
-         ! wind interpolation for C grid
-         call ext_vector(uc, vc, gridstruct%dg, bd, domain, gridstruct, flagstruct,1,0,0,1)
-         error_Uc(1) = max(maxval(abs(uc(isd:ied+1,jsd:jed,:)-uc_ref(isd:ied+1,jsd:jed,:)))/maxval(abs(uc_ref)), &
-                           maxval(abs(vc(isd:ied,jsd:jed+1,:)-vc_ref(isd:ied,jsd:jed+1,:)))/maxval(abs(vc_ref)))
-         
-         ! wind interpolation for D grid
-         call ext_vector(ud, vd, gridstruct%dg, bd, domain, gridstruct, flagstruct,0,1,1,0)
-         error_Ud(1) = max(maxval(abs(vd-vd_ref))/maxval(abs(vd_ref)), &
-                           maxval(abs(ud-ud_ref))/maxval(abs(ud_ref)))
-
-         !error_Uc(1) = max(error_Uc(1), &
-         !maxval( abs(gridstruct%dg%L%E_buffer_ua_c(ie+1:ied,jsd:jed,1) - ua_ref(ie+1:ied,jsd:jed,1))))
-         !error_Uc(1) = max(error_Uc(1), &
-         !maxval( abs(gridstruct%dg%L%E_buffer_va_c(ie+1:ied,jsd:jed,1) - va_ref(ie+1:ied,jsd:jed,1))))
-
-         !error_Uc(1) = max(error_Uc(1), &
-         !maxval( abs(gridstruct%dg%L%W_buffer_ua_c(isd:is-1,jsd:jed,1) - ua_ref(isd:is-1,jsd:jed,1))))
-         !error_Uc(1) = max(error_Uc(1), &                                                             
-         !maxval( abs(gridstruct%dg%L%W_buffer_va_c(isd:is-1,jsd:jed,1) - va_ref(isd:is-1,jsd:jed,1))))
-
-         !error_Uc(1) = max(error_Uc(1), &
-         !maxval( abs(gridstruct%dg%L%N_buffer_ua_c(jsd:jed,ie+1:ied,1) - ua_ref(jsd:jed,ie+1:ied,1))))
-         !error_Uc(1) = max(error_Uc(1), &                                                             
-         !maxval( abs(gridstruct%dg%L%N_buffer_va_c(jsd:jed,ie+1:ied,1) - va_ref(jsd:jed,ie+1:ied,1))))
-
-         !error_Uc(1) = max(error_Uc(1), &
-         !maxval( abs(gridstruct%dg%L%S_buffer_ua_c(jsd:jed,isd:is-1,1) - ua_ref(jsd:jed,isd:is-1,1))))
-         !error_Uc(1) = max(error_Uc(1), &                                                             
-         !maxval( abs(gridstruct%dg%L%S_buffer_va_c(jsd:jed,isd:is-1,1) - va_ref(jsd:jed,isd:is-1,1))))
-
-         ! Get maximum error
-         master = mpp_root_pe()
-         nprocs = mpp_npes()
-         if (mpp_pe()==master) then
-            allocate(errors_ha(0:nprocs-1))
-            allocate(errors_hb(0:nprocs-1))
-            allocate(errors_Ua(0:nprocs-1))
-            allocate(errors_Uc(0:nprocs-1))
-            allocate(errors_Ud(0:nprocs-1))
-            errors_ha(master) = error_ha(1)
-            errors_hb(master) = error_hb(1)
-            errors_Ua(master) = error_Ua(1)
-            errors_Uc(master) = error_Uc(1)
-            errors_Ud(master) = error_Ud(1)
-            do i = 0, nprocs-1
-               if(i .ne. master )then
-                  call mpp_recv(error_ha , size(error_ha), from_pe=i)
-                  errors_ha(i) = error_ha(1)
-                  call mpp_recv(error_hb, size(error_hb), from_pe=i)
-                  errors_hb(i) = error_hb(1)
-                  call mpp_recv(error_Ua, size(error_Ua), from_pe=i)
-                  errors_Ua(i) = error_Ua(1)
-                  call mpp_recv(error_Uc, size(error_Uc), from_pe=i)
-                  errors_Uc(i) = error_Uc(1)
-                  call mpp_recv(error_Ud, size(error_Ud), from_pe=i)
-                  errors_Ud(i) = error_Ud(1)
-                  !print*, master, 'received ', errors(i), 'from', i
-               endif
-            enddo
-
-            filename_dg = "error_duogrid.txt"
-            ! open the file
-            open(12, file=filename_dg, status='replace')
-            write(12,*) maxval(errors_ha)
-            write(12,*) maxval(errors_hb)
-            write(12,*) maxval(errors_Ua)
-            write(12,*) maxval(errors_Uc)
-            write(12,*) maxval(errors_Ud)
-            close(12)
-
-            print*, 'Maximum error for ha =', maxval(errors_ha)
-            print*, 'Maximum error for hb =', maxval(errors_hb)
-            print*, 'Maximum error for Ua =', maxval(errors_Ua)
-            print*, 'Maximum error for Uc =', maxval(errors_Uc)
-            print*, 'Maximum error for Ud =', maxval(errors_Ud)
-            print*, 'ERROR saved at ', filename_dg
-            print*
-
-            deallocate(errors_ha)
-            deallocate(errors_hb)
-            deallocate(errors_Ua)
-            deallocate(errors_Uc)
-            deallocate(errors_Ud)
-         else
-            !print*, mpp_pe(), 'is sending ', error, 'to', master
-            call mpp_send(error_ha, size(error_ha), to_pe=master)
-            call mpp_send(error_hb, size(error_hb), to_pe=master)
-            call mpp_send(error_Ua, size(error_Ua), to_pe=master)
-            call mpp_send(error_Uc, size(error_Uc), to_pe=master)
-            call mpp_send(error_Ud, size(error_Ud), to_pe=master)
-         endif
-
-         call mp_stop()
       case(-1)
          Ubar = (2.0*pi*radius)/(12.0*86400.0)
          gh0  = 2.94e4
@@ -1425,8 +986,8 @@
          gh0  = 1.0
          phis = 0.0 + 0.5
          r0 = radius/3. !RADIUS radius/3.
-         p1(1) = pi*0.25d0
-         p1(2) = pi*0.5d0 - dacos(1.d0/dsqrt(3.d0))
+         p1(1) = pi/2. + pi_shift
+         p1(2) = 0.
          do j=jsd,jed
             do i=isd,ied
                p2(1) = agrid(i,j,1)
@@ -1437,163 +998,9 @@
                else
                   delp(i,j,1) = phis(i,j)
                endif
-               delp(i,j,1) = delp(i,j,1)*grav
-               q(i,j,1,1) = 1.d0
             enddo
          enddo
-         initWindsCase=initWindsCase7
-
-     ! Gaussian hill advection, using rotated zonal wind from W92
-      case(-3)
-         Ubar = (2.0*pi*radius)/(12.0*86400.0)
-         gh0  = 1.0
-         phis = 0.1d0
-
-         ! center of Gaussian hill (a cube corner)
-         e1(1) = 1.d0/dsqrt(3.d0)
-         e1(2) = e1(1)
-         e1(3) = e1(1)
-         do j=js,je
-            do i=is,ie
-               p2(1) = agrid(i,j,1)
-               p2(2) = agrid(i,j,2)
-               call latlon2xyz(p2,e2)
-               r = norm2(e2-e1)
-               delp(i,j,1) = 0.1d0 + 0.9d0*(dexp(-10d0*r*r))
-               delp(i,j,1) = delp(i,j,1)*grav
-               q(i,j,1,1) = 1.d0
-            enddo
-         enddo
-         initWindsCase=initWindsCase7
-
-     ! Steady test case (tc2) using the exact zonal wind
-     case(-4)
-         Ubar = (2.0*pi*radius)/(12.d0*86400.d0)
-         gh0  = 2.94e4
-         phis = 0.0
-         do j=js,je
-            do i=is,ie
-               delp(i,j,1) = gh0 - (radius*omega*Ubar + (Ubar*Ubar)/2.) * &
-                             ( -1.*dcos(agrid(i  ,j  ,1))*dcos(agrid(i  ,j  ,2))*sin(alpha) + &
-                                   dsin(agrid(i  ,j  ,2))*dcos(alpha) ) ** 2.0
-               delp(i,j,1) = delp(i,j,1)*grav
-            enddo
-         enddo
-         initWindsCase=initWindsCase7
-
-     ! Two Gaussian hills test from Nair & Laurtizen (NL2010)
-     case(-5,-6)
-         if(test_case==-5) then
-            Ubar = (2.0*pi*radius)/(12.0*86400.0)
-         else
-            Ubar = (2.0*pi*radius)/(12.0*86400.0)
-         endif
-         gh0  = 1.0
-         phis = 0.1d0
- 
-         ! center of firts Gaussian hill
-         p1(1) = pi*0.25d0
-         p1(2) = 0.d0
-         call latlon2xyz(p1,e1)
-         do j=js,je
-            do i=is,ie
-               p2(1) = agrid(i,j,1)
-               p2(2) = agrid(i,j,2)
-               call latlon2xyz(p2,e2)
-               r = norm2(e2-e1)
-               delp(i,j,1) = phis(i,j) + 0.9d0*(dexp(-5d0*r*r))
-            enddo
-         enddo
-
-         ! Second Gaussian hill
-         p1(1) =-pi*0.25d0
-         p1(2) = 0.d0
-         call latlon2xyz(p1,e1)
-         do j=js,je
-            do i=is,ie
-               p2(1) = agrid(i,j,1)
-               p2(2) = agrid(i,j,2)
-               call latlon2xyz(p2,e2)
-               r = norm2(e2-e1)
-               delp(i,j,1) = delp(i,j,1) + 0.9d0*(dexp(-5d0*r*r))
-               delp(i,j,1) = delp(i,j,1)*grav
-               q(i,j,1,1) = 1.d0
-            enddo
-         enddo
-         initWindsCase=initWindsCase7
-
-     case(-7)
-         Ubar = (2.0*pi*radius)/(12.0*86400.0)
-         gh0  = 1d0
-         phis = 0.1d0
- 
-         p1(1) = pi*0.25d0
-         p1(2) = pi*0.5d0 - dacos(1.d0/dsqrt(3.d0))
-         r0 = radius/3
-         do j=jsd,jed
-            do i=isd,ied
-               p3(1) = agrid(i,j,1)
-               p3(2) = agrid(i,j,2)
-               if(p3(1)>pi) p3(1) = p3(1) - 2.d0*pi
-
-               r1 = great_circle_dist( p1, p3, radius )
-               delp(i,j,1) = 0.1d0
-               if (r1 < r0) then
-                  delp(i,j,1) = 1.d0
-                  if(abs(p3(1)-p1(1)) <= 0.05d0) then
-                    if(p3(2)-p1(2)>=0) delp(i,j,1) = 0.1d0
-                  endif
-               endif
-               delp(i,j,1) = delp(i,j,1)*grav
-               q(i,j,1,1) = 1.d0
-            enddo
-         enddo
-         initWindsCase=initWindsCase7
-
-
-     case(-8)
-         Ubar = (0.5*pi*radius)/(12.0*86400.0)
-         gh0  = 1.0
-         phis = 0.1d0
- 
-         ! center of Cylinder
-         p1(1) = pi*0.25d0
-         p1(2) = 0.d0
-         ! center of secondd cylinder
-         p2(1) =-pi*0.25d0
-         p2(2) = 0.d0
- 
-         r0 = radius/3
-         do j=jsd,jed
-            do i=isd,ied
-               p3(1) = agrid(i,j,1)
-               p3(2) = agrid(i,j,2)
-               if(p3(1)>pi) p3(1) = p3(1) - 2.d0*pi
-
-               r1 = great_circle_dist( p1, p3, radius )
-               delp(i,j,1) = 0.1d0
-               if (r1 < r0) then
-                  delp(i,j,1) = 1.d0
-                  if(abs(p3(1)-p1(1)) <= 0.05d0) then
-                    if(p3(2)-p1(2)>=0) delp(i,j,1) = 0.1d0
-                  endif
-               endif
-
-               r2 = great_circle_dist( p2, p3, radius )
-               if (r2 < r0) then
-                  delp(i,j,1) = 1.d0
-                  if(abs(p3(1)-p2(1)) <= 0.05d0) then
-                    if(p3(2)-p2(2)<=0) delp(i,j,1) = 0.1d0
-                  endif
-               endif
- 
-               delp(i,j,1) = delp(i,j,1)*grav
-            enddo
-         enddo
- 
-
-
-         initWindsCase=initWindsCase7
+         initWindsCase=initWindsCase1
       case(2)
          gh0  = 1.0e-6
          r0 = radius/3. !RADIUS radius/3.
@@ -1619,9 +1026,28 @@
             do i=is2,ie2
 !         do j=jsd,jed
 !            do i=isd,ied
+#ifdef FIVE_AVG
+               pt5 = gh0 - (radius*omega*Ubar + (Ubar*Ubar)/2.) * &
+                             ( -1.*cos(agrid(i  ,j  ,1))*cos(agrid(i  ,j  ,2))*sin(alpha) + &
+                                   sin(agrid(i  ,j  ,2))*cos(alpha) ) ** 2.0
+               pt1 = gh0 - (radius*omega*Ubar + (Ubar*Ubar)/2.) * &
+                             ( -1.*cos(grid(i  ,j  ,1))*cos(grid(i  ,j  ,2))*sin(alpha) + &
+                                   sin(grid(i  ,j  ,2))*cos(alpha) ) ** 2.0
+               pt2 = gh0 - (radius*omega*Ubar + (Ubar*Ubar)/2.) * &
+                             ( -1.*cos(grid(i+1,j  ,1))*cos(grid(i+1,j  ,2))*sin(alpha) + &
+                                   sin(grid(i+1,j  ,2))*cos(alpha) ) ** 2.0
+               pt3 = gh0 - (radius*omega*Ubar + (Ubar*Ubar)/2.) * &
+                             ( -1.*cos(grid(i+1,j+1,1))*cos(grid(i+1,j+1,2))*sin(alpha) + &
+                                   sin(grid(i+1,j+1,2))*cos(alpha) ) ** 2.0
+               pt4 = gh0 - (radius*omega*Ubar + (Ubar*Ubar)/2.) * &
+                             ( -1.*cos(grid(i,j+1,1))*cos(grid(i,j+1,2))*sin(alpha) + &
+                                   sin(grid(i,j+1,2))*cos(alpha) ) ** 2.0
+               delp(i,j,1) = (0.25*(pt1+pt2+pt3+pt4) + 3.*pt5) / 4.
+#else
                delp(i,j,1) = gh0 - (radius*omega*Ubar + (Ubar*Ubar)/2.) * &
                              ( -1.*cos(agrid(i  ,j  ,1))*cos(agrid(i  ,j  ,2))*sin(alpha) + &
                                    sin(agrid(i  ,j  ,2))*cos(alpha) ) ** 2.0
+#endif FIVE_AVG
             enddo
          enddo
          initWindsCase=initWindsCase2
@@ -1763,7 +1189,7 @@
          gh0  = 5960.*Grav
          phis = 0.0
          r0 = PI/9.
-         p1(1) = 3.*PI/2. + PI*0.25d0
+         p1(1) = PI/2.
          p1(2) = PI/6.
          do j=js2,je2
             do i=is2,ie2
@@ -1796,104 +1222,6 @@
             initWindsCase=initWindsCase5
          endif
 
-      case(105)
-
-         Ubar = 20.d0
-         gh0  = 5960.d0*Grav
-         phis = 0.0d0
-         p1(1) = 3.d0*PI/2.d0 + PI/4.d0
-         p1(2) = PI/6.d0
-         call latlon2xyz(p1,e1)
-         do j=js2,je2
-            do i=is2,ie2
-               p2(1) = agrid(i,j,1)
-               p2(2) = agrid(i,j,2)
-               call latlon2xyz(p2,e2)
-               r = norm2(e2-e1)
-               phis(i,j) = 2000.d0*Grav*dexp(-10d0*r*r)
-            enddo
-         enddo
-         do j=js2,je2
-            do i=is2,ie2
-               delp(i,j,1) =gh0 - (radius*omega*Ubar + 0.5d0*(Ubar*Ubar)) * &
-                             (dsin(agrid(i  ,j  ,2)))**2  - phis(i,j)
-            enddo
-         enddo
-         initWindsCase=initWindsCase5
-
-      case(110)
-         call compute_conversion_matrices(bd, gridstruct)
-         Ubar = (2.0*pi*radius)/(12.0*86400.0)
-         gh0 = 1000.d0*grav
-         phis = 0.0
-         do j=js,je
-            do i=is,ie
-               lat = agrid(i,j,1)
-               lon = agrid(i,j,2)
-               call case110_forcing(lat, lon, Ubar, gh0, u_forcing, v_forcing, phi_forcing)
-               delp(i,j,1) = grav*1000.d0
-               forcing_delp(i,j) = phi_forcing
-            enddo
-         enddo
-         do j=js,je
-            do i=is,ie+1
-               p1(:) = grid(i  ,j ,1:2)
-               p2(:) = grid(i,j+1 ,1:2)
-               call mid_pt_sphere(p1, p2, p3)
-               call get_unit_vect2(p1, p2, e2)
-               call get_latlon_vector(p3, ex, ey)
-               call compute_wind_NL2010(utmp, vtmp, p3(1), p3(2), 0.d0, 12.d0*86400d0, Ubar)
-               v(i,j,1) = utmp*inner_prod(e2,ex) + vtmp*inner_prod(e2,ey)
-
-               lat = p3(1)
-               lon = p3(2)
-               call case110_forcing(lat, lon, Ubar, gh0, u_forcing, v_forcing, phi_forcing)
-
-               ! convert forcing from latlon to covariant
-               a11 = c_l2covari(1,1,i,j)
-               a12 = c_l2covari(1,2,i,j)
-               a21 = c_l2covari(2,1,i,j)
-               a22 = c_l2covari(2,2,i,j)
- 
-               forcing_uc(i,j) = a11*u_forcing + a12*v_forcing
-               forcing_vc(i,j) = a21*u_forcing + a22*v_forcing
-            enddo
-         enddo
-         do j=js,je+1
-            do i=is,ie
-               p1(:) = grid(i,  j,1:2)
-               p2(:) = grid(i+1,j,1:2)
-               call mid_pt_sphere(p1, p2, p3)
-               call get_unit_vect2(p1, p2, e1)
-               call get_latlon_vector(p3, ex, ey)
-               call compute_wind_NL2010(utmp, vtmp, p3(1), p3(2), 0.d0, 12.d0*86400d0, Ubar)
-               u(i,j,1) = utmp*inner_prod(e1,ex) + vtmp*inner_prod(e1,ey)
-
-               lat = p3(1)
-               lon = p3(2)
-               call case110_forcing(lat, lon, Ubar, gh0, u_forcing, v_forcing, phi_forcing)
-
-               ! convert forcing from latlon to covariant
-               a11 = d_l2covari(1,1,i,j)
-               a12 = d_l2covari(1,2,i,j)
-               a21 = d_l2covari(2,1,i,j)
-               a22 = d_l2covari(2,2,i,j)
- 
-               forcing_ud(i,j) = a11*u_forcing + a12*v_forcing
-               forcing_vd(i,j) = a21*u_forcing + a22*v_forcing
-            enddo
-         enddo
-
-         if (.not. gridstruct%dg%is_initialized) then
-           call mp_update_dwinds(u, v, npx, npy, npz, domain, bd)
-         else
-           call ext_vector(u, v, gridstruct%dg, bd, domain,gridstruct, flagstruct,0,1,1,0)
-         endif
-
-         call dtoa( u, v,ua,va,dx,dy,dxa,dya,dxc,dyc,npx,npy,ng,bd)
-         !call mpp_update_domains( ua, va, domain, gridtype=AGRID_PARAM)
-         call atoc(ua,va,uc,vc,dx,dy,dxa,dya,npx,npy,ng, gridstruct%bounded_domain, domain, bd, gridstruct, flagstruct)
-         initWindsCase=initWindsCase6
 
       case(6)
          Ubar = (2.0*pi*radius)/(12.0*86400.0)
@@ -1955,152 +1283,74 @@
          call atoc(ua,va,uc,vc,dx,dy,dxa,dya,npx,npy,ng, gridstruct%bounded_domain, domain, bd, gridstruct, flagstruct)
          initWindsCase=initWindsCase6
 
-      case(7)   ! Galewsky et al test case - From J. Thuburns code
-         u00 = 80.0
-         lat0 = pi/7.0
-         lat1 = pi/2.0 - lat0
-
-         en = exp(-4/(lat1 - lat0)**2)
-         umen = u00/en
-         totvol = 0.0D0
-         totarea = 0.0D0
-
-         ! Integrate to tabulate h and psi as functions of geographical
-         ! latitude
-         nygg = 4*npx
-         allocate(psigg(nygg+1))
-         dygg = pi/nygg
-         psigg(1) = 0.0D0
-         do j = 2, nygg
-           l1 = (j-2)*dygg - pi*0.5D0
-           den = (l1 - lat0)*(l1 - lat1)
-           if (den .lt. 0.0D0) then
-            u_1 = umen*exp(1.0D0/den)
-           else
-             u_1 = 0.0D0
-           endif
-           l2 = (j-1)*dygg - pi*0.5D0
-           den = (l2 - lat0)*(l2 - lat1)
-           if (den .lt. 0.0D0) then
-             u_2 = umen*exp(1.0D0/den)
-           else
-             u_2 = 0.0D0
-           endif
-           u_1 = u_1*(2.0d0*omega*SIN(l1) + TAN(l1)*u_1/radius)
-           u_2 = u_2*(2.0d0*omega*SIN(l2) + TAN(l2)*u_2/radius)
-           psigg(j) = psigg(j-1) - radius*0.5d0*(u_1 + u_2)*dygg
-
-           totarea = totarea + COS(l2)*dygg
-           totvol = totvol + psigg(j)*COS(l2)*dygg
-
-         enddo
-         psigg(nygg+1) = psigg(nygg)
-         totvol = totvol/(totarea*grav)
-         psigg = psigg + (1.0D4 - totvol)*grav !potential phi2
-         !psigg=psigg/grav !Height
-
-         ! Now assign h as a function of geographical latitude
-         ! using interpolation from tabulated values
-         totvol = 0.00
-         totarea = 0.0D0
-         do j=js,je
-           do i=is,ie
-              lon = agrid(i,j,1)
-              lat = agrid(i,j,2)
-              l1 = lat + pi*0.5D0
-              jy = floor(l1/dygg) + 1
-              beta = (l1 - (jy - 1)*dygg)/dygg
-              if (jy == 1 .or. jy == nygg) then
-                ! Linear interpolation
-                cc2 = 1.0D0 - beta
-                cc3 = beta
-                delp(i,j,1)=(cc2*psigg(jy) + cc3*psigg(jy+1)) !modif psp
-              else
-                ! Cubic interpolation
-                cc1 = -beta*(beta - 1.0D0)*(beta - 2.0D0)/6.0D0
-                cc2 = 0.5D0*(beta + 1.0D0)*(beta - 1.0D0)*(beta - 2.0D0)
-                cc3 = -0.5D0*(beta + 1.0D0)*beta*(beta - 2.0D0)
-                cc4 = (beta + 1.0D0)*beta*(beta - 1.0D0)/6.0D0
-                delp(i,j,1) = (cc1*psigg(jy-1) + cc2*psigg(jy) + cc3*psigg(jy+1) + cc4*psigg(jy+2)) !*farea(if0,ngrids)
-              endif
-              totarea = totarea + area(i,j)
-              totvol = totvol + delp(i,j,1)
-           enddo
-         enddo
-
-         !print*, 'psigg', minval(psigg), maxval(psigg)
-         !topography
+      case(7)
+! Barotropically unstable jet
+         gh0  = 10.E3*Grav
          phis = 0.0
-
-         ! add pertubation
-         hpert = 120.0D0
-         alpha0 = 1.0D0/3.0D0
-         beta = 1.0D0/15.0D0
-         lat2 = 0.25D0*pi
-
+         r0 = radius/12.
+         p2(1) = pi/2.
+         p2(2) = pi/4.
          do j=js,je
-           do i=is,ie
-              long = agrid(i,j,1)
-              lat = agrid(i,j,2)
- 
-              l2 = lat
-              l1 = long
-              clat = COS(l2)
-              e_1 = EXP(-(l1/alpha0)**2)
-              e_2 = EXP(-((lat2 - l2)/beta)**2)
-              delp(i,j,1) = delp(i,j,1)+hpert*clat*e_1*e_2
-           enddo
+            do i=is,ie
+!              ftmp = gh0
+! 9-point average:
+!      9  4  8
+!
+!      5  1  3
+!
+!      6  2  7
+               pt1 = gh_jet(npy, agrid(i,j,2))
+               call mid_pt_sphere(grid(i,j,1:2), grid(i+1,j,1:2), pa)
+               pt2 = gh_jet(npy, pa(2))
+               call mid_pt_sphere(grid(i+1,j,1:2), grid(i+1,j+1,1:2), pa)
+               pt3 = gh_jet(npy, pa(2))
+               call mid_pt_sphere(grid(i,j+1,1:2), grid(i+1,j+1,1:2), pa)
+               pt4 = gh_jet(npy, pa(2))
+               call mid_pt_sphere(grid(i,j,1:2), grid(i,j+1,1:2), pa)
+               pt5 = gh_jet(npy, pa(2))
+               pt6 = gh_jet(npy, grid(i,  j,  2))
+               pt7 = gh_jet(npy, grid(i+1,j,  2))
+               pt8 = gh_jet(npy, grid(i+1,j+1,2))
+               pt9 = gh_jet(npy, grid(i  ,j+1,2))
+               ftmp = 0.25*pt1 + 0.125*(pt2+pt3+pt4+pt5) + 0.0625*(pt6+pt7+pt8+pt9)
+! Using great circle dist:
+               p1(:) = agrid(i,j,1:2)
+               delp(i,j,1) = ftmp
+               r = great_circle_dist(p1, p2, radius)
+               if ( r < 3.*r0 ) then
+                    delp(i,j,1) = delp(i,j,1) + 1000.*grav*exp(-(r/r0)**2)
+               endif
+            enddo
          enddo
 
-         !Set velocity field
-         ! U-wind:
+! v-wind:
+         do j=js,je
+            do i=is,ie+1
+               p2(:) = grid(i,j+1,1:2)
+               vv1 = u_jet(p2(2))*(ee2(2,i,j+1)*cos(p2(1)) - ee2(1,i,j+1)*sin(p2(1)))
+               p1(:) = grid(i,j,1:2)
+               vv3 = u_jet(p1(2))*(ee2(2,i,j)*cos(p1(1)) - ee2(1,i,j)*sin(p1(1)))
+! Mid-point:
+               call mid_pt_sphere(p1, p2, pa)
+               vv2 = u_jet(pa(2))*(ew(2,i,j,2)*cos(pa(1)) - ew(1,i,j,2)*sin(pa(1)))
+! 3-point average:
+               v(i,j,1) = 0.25*(vv1 + 2.*vv2 + vv3)
+            enddo
+         enddo
+! U-wind:
          do j=js,je+1
-           do i=is,ie
-             p1(:) = grid(i,  j,1:2)
-             p2(:) = grid(i+1,j,1:2)
-             call mid_pt_sphere(p1, p2, p3)
-             call get_unit_vect2(p1, p2, e1)
-             call get_latlon_vector(p3, ex, ey)
-
-             ! Compute latlon wind
-             lon = p3(1)
-             lat = p3(2)
-             utmp=0.D0
-             vtmp=0.D0
-             den = (lat - lat0)*(lat - lat1)
-             if (den .lt. 0.0D0) then
-               utmp = umen*exp(1.0D0/den)
-             end if
-
-             ! Convert to cube
-             u(i,j,1) = utmp*inner_prod(e1,ex) + vtmp*inner_prod(e1,ey)
-           enddo
+            do i=is,ie
+               p1(:) = grid(i,j,1:2)
+               uu1 = u_jet(p1(2))*(ee1(2,i,j)*cos(p1(1)) - ee1(1,i,j)*sin(p1(1)))
+               p2(:) = grid(i+1,j,1:2)
+               uu3 = u_jet(p2(2))*(ee1(2,i+1,j)*cos(p2(1)) - ee1(1,i+1,j)*sin(p2(1)))
+! Mid-point:
+               call mid_pt_sphere(p1, p2, pa)
+               uu2 = u_jet(pa(2))*(es(2,i,j,1)*cos(pa(1)) - es(1,i,j,1)*sin(pa(1)))
+! 3-point average:
+               u(i,j,1) = 0.25*(uu1 + 2.*uu2 + uu3)
+            enddo
          enddo
-
-         ! V-wind:
-         do j=js,je
-           do i=is,ie+1
-             p1(:) = grid(i  ,j ,1:2)
-             p2(:) = grid(i,j+1 ,1:2)
-             call mid_pt_sphere(p1, p2, p3)
-             call get_unit_vect2(p1, p2, e2)
-             call get_latlon_vector(p3, ex, ey)
-
-             ! Compute latlon wind
-             lon = p3(1)
-             lat = p3(2)
-             utmp=0.D0
-             vtmp=0.D0
-             den = (lat - lat0)*(lat - lat1)
-             if (den .lt. 0.0D0) then
-               utmp = umen*exp(1.0D0/den)
-             end if
-
-             ! Convert to cube
-             v(i,j,1) = utmp*inner_prod(e2,ex) + vtmp*inner_prod(e2,ey)
-           enddo
-         enddo
-
          initWindsCase=initWindsCase6  ! shouldn't do anything with this
 !initialize tracer with shallow-water PV
          !Compute vorticity
@@ -4704,7 +3954,7 @@ endif
          endif
     !call mp_update_dwinds(u, v, npx, npy, npz, domain, bd)
 
-    flagstruct%is_ideal_case = .true.
+    is_ideal_case = .true.
 
     nullify(agrid)
     nullify(grid)
@@ -4780,7 +4030,7 @@ endif
 
   end subroutine get_vorticity
 
-  subroutine checker_tracers(i0, i1, j0, j1, is, ie, jfirst, jlast,  &
+  subroutine checker_tracers(i0, i1, j0, j1, ifirst, ilast, jfirst, jlast,  &
                              nq, km, q, lon, lat, nx, ny, rn)
 !--------------------------------------------------------------------
 ! This routine computes the checker-board tracer pattern with optional
@@ -4795,12 +4045,12 @@ endif
   integer, intent(in):: km          ! vertical dimension
   integer, intent(in):: i0, i1      ! compute domain dimension in E-W
   integer, intent(in):: j0, j1      ! compute domain dimension in N-S
-  integer, intent(in):: is, ie, jfirst, jlast ! tracer array dimensions
+  integer, intent(in):: ifirst, ilast, jfirst, jlast ! tracer array dimensions
   real, intent(in):: nx    ! east-west wave number
   real, intent(in):: ny    ! North-south wave number
   real, intent(in), optional:: rn    ! (optional) magnitude of random perturbation
   real(kind=R_GRID), intent(in), dimension(i0:i1,j0:j1):: lon, lat
-  real, intent(out):: q(is:ie,jfirst:jlast,km,nq)
+  real, intent(out):: q(ifirst:ilast,jfirst:jlast,km,nq)
 ! Local var:
   real:: qt(i0:i1,j0:j1)
   real:: qtmp, ftmp
@@ -4849,7 +4099,7 @@ endif
 
   end subroutine checker_tracers
 
-  subroutine terminator_tracers(i0, i1, j0, j1, is, ie, jfirst, jlast,  &
+  subroutine terminator_tracers(i0, i1, j0, j1, ifirst, ilast, jfirst, jlast,  &
        km, q, delp, ncnst, lon, lat, bd)
 !--------------------------------------------------------------------
 ! This routine implements the terminator test.
@@ -4860,11 +4110,11 @@ endif
   integer, intent(in):: km          ! vertical dimension
   integer, intent(in):: i0, i1      ! compute domain dimension in E-W
   integer, intent(in):: j0, j1      ! compute domain dimension in N-S
-  integer, intent(in):: is, ie, jfirst, jlast ! tracer array dimensions
+  integer, intent(in):: ifirst, ilast, jfirst, jlast ! tracer array dimensions
   integer, intent(in):: ncnst
-  real(kind=R_GRID), intent(in), dimension(is:ie,jfirst:jlast):: lon, lat
-  real, intent(inout):: q(is:ie,jfirst:jlast,km,ncnst)
-  real, intent(in):: delp(is:ie,jfirst:jlast,km)
+  real(kind=R_GRID), intent(in), dimension(ifirst:ilast,jfirst:jlast):: lon, lat
+  real, intent(inout):: q(ifirst:ilast,jfirst:jlast,km,ncnst)
+  real, intent(in):: delp(ifirst:ilast,jfirst:jlast,km)
 ! Local var:
   real:: D, k1, r, ll, sinthc, costhc, mm
   integer:: i,j,k
@@ -5101,8 +4351,6 @@ end subroutine terminator_tracers
 !
 ! ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ !
 !-------------------------------------------------------------------------------
-
-
 
 !-------------------------------------------------------------------------------
 ! vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv !
@@ -6647,7 +5895,7 @@ end subroutine terminator_tracers
 
         end select
 
-        flagstruct%is_ideal_case = .true.
+        is_ideal_case = .true.
 
         nullify(grid)
         nullify(agrid)
@@ -8587,14 +7835,14 @@ end subroutine terminator_tracers
 !
 !     gsum :: get global sum
 !
-      real  function globalsum(p, npx, npy, is, ie, jfirst, jlast, isd, ied, jsd, jed, gridstruct, tile) result (gsum)
+      real  function globalsum(p, npx, npy, ifirst, ilast, jfirst, jlast, isd, ied, jsd, jed, gridstruct, tile) result (gsum)
 
          integer,   intent(IN)    :: npx, npy
-         integer,   intent(IN)    :: is, ie
+         integer,   intent(IN)    :: ifirst, ilast
          integer,   intent(IN)    :: jfirst, jlast
          integer,   intent(IN)    :: isd, ied
          integer,   intent(IN)    :: jsd, jed, tile
-         real  , intent(IN)    :: p(is:ie,jfirst:jlast)      ! field to be summed
+         real  , intent(IN)    :: p(ifirst:ilast,jfirst:jlast)      ! field to be summed
          type(fv_grid_type), intent(IN), target :: gridstruct
 
          integer :: i,j,k,n
@@ -8660,12 +7908,12 @@ end subroutine terminator_tracers
 
             do n=tile,tile
                do j=jfirst,jlast
-                  do i=is,ie
+                  do i=ifirst,ilast
                      p_R8(i,j,n) = p(i,j)*area(i,j)
                   enddo
                enddo
             enddo
-            call mp_gather(p_R8, is,ie, jfirst,jlast, npx-1, npy-1, ntiles_g)
+            call mp_gather(p_R8, ifirst,ilast, jfirst,jlast, npx-1, npy-1, ntiles_g)
             if (is_master()) then
                do n=1,ntiles_g
                   do j=1,npy-1
@@ -8729,20 +7977,20 @@ end subroutine terminator_tracers
 ! !ROUTINE: mp_ghost_ew --- Ghost 4d east/west "lat/lon periodic
 !
 ! !INTERFACE:
-      subroutine mp_ghost_ew(im, jm, km, nq, is, ie, jfirst, jlast, &
+      subroutine mp_ghost_ew(im, jm, km, nq, ifirst, ilast, jfirst, jlast, &
                               kfirst, klast, ng_w, ng_e, ng_s, ng_n, q_ghst, q)
 !
 ! !INPUT PARAMETERS:
       integer, intent(in):: im, jm, km, nq
-      integer, intent(in):: is, ie
+      integer, intent(in):: ifirst, ilast
       integer, intent(in):: jfirst, jlast
       integer, intent(in):: kfirst, klast
       integer, intent(in):: ng_e      ! eastern  zones to ghost
       integer, intent(in):: ng_w      ! western  zones to ghost
       integer, intent(in):: ng_s      ! southern zones to ghost
       integer, intent(in):: ng_n      ! northern zones to ghost
-      real, intent(inout):: q_ghst(is-ng_w:ie+ng_e,jfirst-ng_s:jlast+ng_n,kfirst:klast,nq)
-      real, optional, intent(in):: q(is:ie,jfirst:jlast,kfirst:klast,nq)
+      real, intent(inout):: q_ghst(ifirst-ng_w:ilast+ng_e,jfirst-ng_s:jlast+ng_n,kfirst:klast,nq)
+      real, optional, intent(in):: q(ifirst:ilast,jfirst:jlast,kfirst:klast,nq)
 !
 ! !DESCRIPTION:
 !
@@ -8757,8 +8005,8 @@ end subroutine terminator_tracers
       integer :: i,j,k,n
 
       if (present(q)) then
-         q_ghst(is:ie,jfirst:jlast,kfirst:klast,1:nq) = &
-              q(is:ie,jfirst:jlast,kfirst:klast,1:nq)
+         q_ghst(ifirst:ilast,jfirst:jlast,kfirst:klast,1:nq) = &
+              q(ifirst:ilast,jfirst:jlast,kfirst:klast,1:nq)
       endif
 
 !      Assume Periodicity in X-dir and not overlapping
@@ -8766,10 +8014,10 @@ end subroutine terminator_tracers
          do k=kfirst,klast
             do j=jfirst-ng_s,jlast+ng_n
                do i=1, ng_w
-                  q_ghst(is-i,j,k,n) = q_ghst(ie-i+1,j,k,n)
+                  q_ghst(ifirst-i,j,k,n) = q_ghst(ilast-i+1,j,k,n)
                enddo
                do i=1, ng_e
-                  q_ghst(ie+i,j,k,n) = q_ghst(is+i-1,j,k,n)
+                  q_ghst(ilast+i,j,k,n) = q_ghst(ifirst+i-1,j,k,n)
                enddo
             enddo
          enddo
@@ -8791,15 +8039,15 @@ end subroutine terminator_tracers
 !               order = 2 -> Uniform PPM
 !               order = 3 -> Non-Uniform PPM
 !
- subroutine interp_left_edge_1d(qout, qin, dx, is, ie, order)
- integer, intent(in):: is,ie
- real, intent(out)  :: qout(is:)
- real, intent(in)   ::  qin(is:)
- real, intent(in)   ::   dx(is:)
+ subroutine interp_left_edge_1d(qout, qin, dx, ifirst, ilast, order)
+ integer, intent(in):: ifirst,ilast
+ real, intent(out)  :: qout(ifirst:)
+ real, intent(in)   ::  qin(ifirst:)
+ real, intent(in)   ::   dx(ifirst:)
  integer, intent(in):: order
  integer :: i
 
- real :: dm(is:ie),qmax,qmin
+ real :: dm(ifirst:ilast),qmax,qmin
  real :: r3, da1, da2, a6da, a6, al, ar
  real :: qLa, qLb1, qLb2
  real :: x
@@ -8809,30 +8057,30 @@ end subroutine terminator_tracers
  qout(:) = 0.0
  if (order==1) then
 ! 1st order Uniform linear averaging
-    do i=is+1,ie
+    do i=ifirst+1,ilast
        qout(i) = 0.5 * (qin(i-1) + qin(i))
     enddo
  elseif (order==2) then
 ! Non-Uniform 1st order average
-    do i=is+1,ie
+    do i=ifirst+1,ilast
        qout(i) = (dx(i-1)*qin(i-1) + dx(i)*qin(i))/(dx(i-1)+dx(i))
     enddo
  elseif (order==3) then
 
 ! PPM - Uniform
-    do i=is+1,ie-1
+    do i=ifirst+1,ilast-1
        dm(i) = 0.25*(qin(i+1) - qin(i-1))
     enddo
 !
 ! Applies monotonic slope constraint
 !
-     do i=is+1,ie-1
+     do i=ifirst+1,ilast-1
         qmax = max(qin(i-1),qin(i),qin(i+1)) - qin(i)
         qmin = qin(i) - min(qin(i-1),qin(i),qin(i+1))
         dm(i) = sign(min(abs(dm(i)),qmin,qmax),dm(i))
      enddo
 
-     do i=is+1,ie-1
+     do i=ifirst+1,ilast-1
          qout(i) = 0.5*(qin(i-1)+qin(i)) + r3*(dm(i-1) - dm(i))
        ! al = 0.5*(qin(i-1)+qin(i)) + r3*(dm(i-1) - dm(i))
        ! da1 = dm(i) + dm(i)
@@ -8840,13 +8088,13 @@ end subroutine terminator_tracers
      enddo
 
 ! First order average to fill in end points
-     qout(is+1) = 0.5 * (qin(is) + qin(is+1))
-     qout(ie) = 0.5 * (qin(ie-1) + qin(ie))
+     qout(ifirst+1) = 0.5 * (qin(ifirst) + qin(ifirst+1))
+     qout(ilast) = 0.5 * (qin(ilast-1) + qin(ilast))
 
  elseif (order==4) then
 
   ! Non-Uniform PPM
-     do i=is+1,ie-1
+     do i=ifirst+1,ilast-1
         dm(i) = ( (2.*dx(i-1) + dx(i) ) /                         &
                   (   dx(i+1) + dx(i) )  )  * ( qin(i+1) - qin(i) ) + &
                 ( (dx(i)   + 2.*dx(i+1)) /                        &
@@ -8859,7 +8107,7 @@ end subroutine terminator_tracers
         endif
      enddo
 
-     do i=is+2,ie-1
+     do i=ifirst+2,ilast-1
         qLa = ( (dx(i-2) + dx(i-1)) / (2.*dx(i-1) +  dx(i)) ) - &
               ( (dx(i+1) + dx(i)) / (2.*dx(i) +  dx(i-1)) )
         qLa = ( (2.*dx(i) * dx(i-1))  / (dx(i-1) + dx(i)) ) * qLa * &
@@ -8877,10 +8125,10 @@ end subroutine terminator_tracers
  elseif (order==5) then
 
      ! Linear Spline
-    do i=is+1,ie-1
-       x = FLOAT(i-(is+1))*FLOAT(ie-is+1-1)/FLOAT(ie-is-1)
-       qout(i) = qin(is+NINT(x)) + (x - NINT(x)) * (qin(is+NINT(x+1)) - qin(is+NINT(x)))
-      ! if (tile==1) print*, is+NINT(x+1), is+NINT(x), (x - NINT(x))
+    do i=ifirst+1,ilast-1
+       x = FLOAT(i-(ifirst+1))*FLOAT(ilast-ifirst+1-1)/FLOAT(ilast-ifirst-1)
+       qout(i) = qin(ifirst+NINT(x)) + (x - NINT(x)) * (qin(ifirst+NINT(x+1)) - qin(ifirst+NINT(x)))
+      ! if (tile==1) print*, ifirst+NINT(x+1), ifirst+NINT(x), (x - NINT(x))
       ! if (tile==1) print*, 0.5*(qin(i-1)+qin(i)), qout(i)
     enddo
 
@@ -9126,1226 +8374,6 @@ end subroutine terminator_tracers
 
  end subroutine sm1_edge
 
-
-   subroutine wind_NL2010(bd, uc, vc, u, v, flagstruct, gridstruct, domain, time)
-      !--------------------------------------------------
-      ! Compute the wind for TC -5, -6 and -8 and -9
-      ! Ref: Nair and Laurtizen 2010
-      !--------------------------------------------------
-      type(fv_grid_bounds_type), intent(IN) :: bd
-      real ,      intent(INOUT) ::   uc(bd%isd:bd%ied+1,bd%jsd:bd%jed  )
-      real ,      intent(INOUT) ::   vc(bd%isd:bd%ied  ,bd%jsd:bd%jed+1)
-
-      real ,      intent(INOUT) ::   u (bd%isd:bd%ied  ,bd%jsd:bd%jed+1)
-      real ,      intent(INOUT) ::   v (bd%isd:bd%ied+1,bd%jsd:bd%jed  )
-
-      type(fv_flags_type), target, intent(IN) :: flagstruct
-      type(fv_grid_type), intent(INOUT), target :: gridstruct
-      type(domain2d), intent(INOUT) :: domain
-      real(kind=R_GRID), pointer, dimension(:,:,:)   :: cgrid, dgrid
-      real  ::   time
-
-      ! aux vars
-      real(kind=R_GRID) :: p1(2), p2(2), p3(2), p4(2), pt(2)
-      real(kind=R_GRID) :: e1(3), e2(3), ex(3), ey(3)
-      real(kind=R_GRID) :: lonp, utmp, vtmp, lat, lon
-
-      ! test parameters
-      real(kind=R_GRID) :: T, Ubar
-
-      ! bounds
-      integer :: i, j
-      integer :: is, ie, js, je
-      integer :: npx, npy
-      integer :: isd, ied, jsd, jed
-
-      is  = bd%is
-      ie  = bd%ie
-      js  = bd%js
-      je  = bd%je
-      isd = bd%isd
-      ied = bd%ied
-      jsd = bd%jsd
-      jed = bd%jed
-
-      npx      = flagstruct%npx
-      npy      = flagstruct%npy
-
-      cgrid=> gridstruct%cgrid_64
-      dgrid=> gridstruct%dgrid_64
-
-      T = 12.d0*86400.d0 ! Period
-      Ubar = (2.d0*pi*radius)/T
-
-      ! cgrid winds
-      do j = jsd, jed
-         do i = is-1, ie+1+1
-            lon = cgrid(i,j,1)
-            lat = cgrid(i,j,2)
-            call compute_wind_NL2010(utmp, vtmp, lat, lon, time, T, Ubar)
-            uc(i,j) = gridstruct%c_l2contra(1,1,i,j)*utmp + gridstruct%c_l2contra(1,2,i,j)*vtmp
-            v (i,j) = gridstruct%c_l2contra(2,1,i,j)*utmp + gridstruct%c_l2contra(2,2,i,j)*vtmp
-         enddo
-      enddo
-
-      ! dgrid winds
-      do j = js-1, je+1+1
-         do i = isd, ied
-            lon = dgrid(i,j,1)
-            lat = dgrid(i,j,2)
-            call compute_wind_NL2010(utmp, vtmp, lat, lon, time, T, Ubar)
-            vc(i,j) = gridstruct%d_l2contra(2,1,i,j)*utmp + gridstruct%d_l2contra(2,2,i,j)*vtmp
-            u (i,j) = gridstruct%d_l2contra(1,1,i,j)*utmp + gridstruct%d_l2contra(1,2,i,j)*vtmp
-         enddo
-      enddo
-
-      if (.not. gridstruct%dg%is_initialized) then
-         call mpp_update_domains( uc, vc, domain, gridtype=CGRID_NE_PARAM)
-         call fill_corners(uc, vc, npx, npy, VECTOR=.true., CGRID=.true.)
-      else
-      !   call ext_vector(uc, vc, gridstruct%dg, bd, domain,gridstruct, flagstruct,1,0,0,1)
-      endif
-
- 
-  end subroutine wind_NL2010
-
-
-subroutine compute_wind_NL2010(u, v, lat, lon, time, T, Ubar)
-    !--------------------------------------------------
-    !
-    !--------------------------------------------------
-    real(kind=R_GRID), intent(out):: u, v
-    real(kind=R_GRID), intent(in):: lat, lon,  time, T, Ubar
-    real(kind=R_GRID) :: lonp
-
-    if (test_case==-5 ) then
-       lonp = lon-2.d0*pi*time/T
-       u = Ubar*(dsin((lonp))**2)*(dsin(2.*lat))*(dcos(pi*time/T))+Ubar*dcos(lat)
-       v = Ubar*(dsin(2*(lonp)))*(dcos(lat))*(dcos(pi*time/T))
-    else if (test_case==-6.or. test_case==-8 .or. test_case==110) then
-       u = -Ubar*(dsin((lon+pi)/2.d0)**2)*(dsin(2.d0*lat))*(dcos(lat)**2)*(dcos(pi*time/T))
-       v = (Ubar/2.d0)*(dsin((lon+pi)))*(dcos(lat)**3)*(dcos(pi*time/T))
-    endif
-
-end subroutine compute_wind_NL2010
-
-
-subroutine case110_forcing(lat, lon, Ubar, phibar, u_forcing, v_forcing, phi_forcing)
-    !--------------------------------------------------
-    !
-    !--------------------------------------------------
-    real(kind=R_GRID), intent(in):: lat, lon
-    real(kind=R_GRID), intent(in):: Ubar, phibar
-    real(kind=R_GRID), intent(inout) :: u_forcing, v_forcing, phi_forcing
-    real(kind=R_GRID) :: twolat, halflon, lonn
-    real(kind=R_GRID) :: u, v
-    real(kind=R_GRID) :: du_dlon, du_dlat
-    real(kind=R_GRID) :: dv_dlon, dv_dlat, dvcos_dlat
-    real(kind=R_GRID) :: du_dlon_cos, dvcos_dlat_cos
-    real(kind=R_GRID) :: f, fu, fv, twoomega, a
-    real(kind=R_GRID) :: u2tan, uvtan , u_cos
-    real(kind=R_GRID) :: twoUbar, halfUbar
-    real(kind=R_GRID) :: div, div2
-
-    a = radius
-    halfUbar = Ubar*0.5d0
-
-    lonn = lon + pi
-    twolat = lat*2.d0
-    halflon = lonn*0.5d0
-
-    ! velocity
-    u = -Ubar*(dsin(halflon)**2)*dsin(twolat)*(dcos(lat)**2)
-    v = halfUbar*(dsin(lonn))*(dcos(lat)**3)
-
-    ! derivatives
-    du_dlon = -halfUbar*dsin(lonn)*dsin(twolat)*(dcos(lat)**2)
-    du_dlat = twoUbar*(dsin(halflon)**2)*(dcos(lat)**2)*&
-              (2.d0*dcos(twolat)-1.d0)
-
-    dv_dlon = halfUbar*dcos(lonn)*dcos(lat)**3
-    dv_dlat = -1.5d0*Ubar*dsin(lonn)*dsin(lat)*dcos(lat)**2
-
-    ! derivatives divided by cosine
-    !du_dlon = -halfUbar*dsin(lonn)*dsin(twolat)*(dcos(lat)**2)
-    du_dlon_cos = -halfUbar*dsin(lonn)*dsin(twolat)*dcos(lat)
-    dvcos_dlat  = -2.d0*Ubar*dsin(lonn)*dsin(lat)*dcos(lat)**3
-    dvcos_dlat_cos = -2.d0*Ubar*dsin(lonn)*dsin(lat)*dcos(lat)**2
-
-    ! Coriolis terms
-    twoomega = 2.d0*omega
-    f = twoomega*dsin(lat)
-    fu = f*u
-    fv = f*v
-
-    ! metric terms
-    u_cos = -Ubar*(dsin(halflon)**2)*dsin(twolat)*dcos(lat)
-    !u_cos = u/dcos(lat)
-    u2tan = u*u*dtan(lat)
-    uvtan = u*v*dtan(lat)
-
-    ! divergent
-    div = (du_dlon_cos + dvcos_dlat_cos)
-    div2 = -3.d0*Ubar*dsin(lonn)*dsin(lat)*dcos(lat)**2
-    div2 = div2/a
-    div = div/a
-    !if(mpp_pe()==0)then
-    !if(abs(div-div2)>10.d0**(-16))then
-    !   print*, div, div2, abs(div-div2)
-    !endif
-
-    ! geopotential forcing
-    phi_forcing = phibar*div
-
-    !u, v forcing
-    u_forcing =  fv - (u_cos*du_dlon + v*du_dlat - uvtan)/a
-    v_forcing = -fu - (u_cos*dv_dlon + v*dv_dlat + u2tan)/a
-
-end subroutine case110_forcing
-
-!-------------------------------------------------------------------------------
-! vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv !
-!
-   subroutine case110_forcing_cgrid(uc,vc,delp, forcing_uc,forcing_vc,forcing_delp, dt, &
-                                    bd, gridstruct, npz)
-     type(fv_grid_bounds_type), intent(IN) :: bd
-     type(fv_grid_type), intent(IN), target :: gridstruct
-     integer, intent(IN) :: npz
-     real, intent(INOUT) :: uc(bd%isd:bd%ied+1,bd%jsd:bd%jed, 1:npz)
-     real, intent(INOUT) :: vc(bd%isd:bd%ied  ,bd%jsd:bd%jed+1, 1:npz)
-     real, intent(INOUT) :: delp(bd%isd:bd%ied ,bd%jsd:bd%jed, 1:npz)
-     real, intent(IN) :: forcing_uc(bd%isd:bd%ied+1,bd%jsd:bd%jed)
-     real, intent(IN) :: forcing_vc(bd%isd:bd%ied  ,bd%jsd:bd%jed+1)
-     real, intent(IN) :: forcing_delp(bd%isd:bd%ied ,bd%jsd:bd%jed)
-     real, intent(IN) :: dt
-     integer :: isd,ied,jsd,jed
-     integer :: is,ie,js,je
-     integer :: i,j
-     real :: dt2
-     real, pointer, dimension(:,:) :: rdxc, rdyc, rarea
-
-
-     is = bd%is
-     ie = bd%ie
-     js = bd%js
-     je = bd%je
-
-     rdxc => gridstruct%rdxc
-     rdyc => gridstruct%rdyc
-     rarea => gridstruct%rarea
-
-     dt2 = 0.5d0*dt
-     do j=js,je
-        do i=is,ie+1
-           uc(i,j,1) = uc(i,j,1) + dt2*rdxc(i,j)*forcing_vc(i,j)
-        enddo
-     enddo
-
-     do j=js,je+1
-        do i=is,ie
-           vc(i,j,1) = vc(i,j,1) + dt2*rdyc(i,j)*forcing_vc(i,j)
-        enddo
-     enddo
-
-     do j=js,je
-        do i=is,ie
-           delp(i,j,1) = delp(i,j,1) + dt2*rarea(i,j)*forcing_delp(i,j)
-        enddo
-     enddo
-     !if(mpp_pe()==0) then
-    !endif
-     !print*,'forcing', maxval(abs(delp(is:ie, js:je,1)-1000.d0*grav))/(1000.d0*grav)
-   end subroutine case110_forcing_cgrid
-!
-! ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ !
-!-------------------------------------------------------------------------------
-
-!-------------------------------------------------------------------------------
-! vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv !
-!
-   subroutine case110_forcing_dgrid(u,v,delp, forcing_ud,forcing_vd,forcing_delp, dt, &
-                                    bd, gridstruct, npz)
-     type(fv_grid_bounds_type), intent(IN) :: bd
-     type(fv_grid_type), intent(IN), target :: gridstruct
-     integer, intent(IN) :: npz
-     real, intent(INOUT) :: u(bd%isd:bd%ied   , bd%jsd:bd%jed+1,1:npz)
-     real, intent(INOUT) :: v(bd%isd:bd%ied+1 , bd%jsd:bd%jed  ,1:npz)
-     real, intent(INOUT) :: delp(bd%isd:bd%ied, bd%jsd:bd%jed  ,1:npz)
-     real, intent(IN) :: forcing_ud(bd%isd:bd%ied  , bd%jsd:bd%jed+1)
-     real, intent(IN) :: forcing_vd(bd%isd:bd%ied+1, bd%jsd:bd%jed  )
-     real, intent(IN) :: forcing_delp(bd%isd:bd%ied ,bd%jsd:bd%jed  )
-     real, intent(IN) :: dt
-     integer :: isd,ied,jsd,jed
-     integer :: is,ie,js,je
-     integer :: i,j
-     real, pointer, dimension(:,:) :: rdx, rdy, rarea
-
-     is = bd%is
-     ie = bd%ie
-     js = bd%js
-     je = bd%je
-
-     rdx => gridstruct%rdx
-     rdy => gridstruct%rdy
-     rarea => gridstruct%rarea
-
-     do j=js,je
-        do i=is,ie+1
-           v(i,j,1) = v(i,j,1) + dt*rdx(i,j)*forcing_vd(i,j)
-        enddo
-     enddo
-
-     do j=js,je+1
-        do i=is,ie
-           u(i,j,1) = u(i,j,1) + dt*rdy(i,j)*forcing_ud(i,j)
-        enddo
-     enddo
-
-     do j=js,je
-        do i=is,ie
-           delp(i,j,1) = delp(i,j,1) + dt*rarea(i,j)*forcing_delp(i,j)
-        enddo
-     enddo
-
-
-   end subroutine case110_forcing_dgrid
-!
-! ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ !
-!-------------------------------------------------------------------------------
-
-
-
-subroutine error_adv_zonal(bd, delp, flagstruct, gridstruct, domain, time, init_step_atmos)
-   !--------------------------------------------------
-   ! Compute the error of the advection problem when the zonal wind is used
-   !--------------------------------------------------
-   type(fv_grid_bounds_type), intent(IN) :: bd
-   real ,      intent(INOUT) ::   delp(bd%isd:bd%ied,bd%jsd:bd%jed  )
-   type(fv_flags_type), target, intent(IN) :: flagstruct
-   type(fv_grid_type), intent(INOUT), target :: gridstruct
-   type(domain2d), intent(INOUT) :: domain
-   real(kind=R_GRID) :: delp_exact(bd%isd:bd%ied  ,bd%jsd:bd%jed)
-   real(kind=R_GRID) :: error(bd%isd:bd%ied  ,bd%jsd:bd%jed)
-   real(kind=R_GRID), pointer, dimension(:,:,:)   :: agrid
-   real, intent(in)  ::   time
-   logical, intent(in) :: init_step_atmos
-
-   ! aux vars
-   real(kind=R_GRID) :: lat, lon
-
-   ! bounds
-   integer :: i, j
-   integer :: is, ie, js, je
-
-   real(kind=R_GRID) :: linf_error, linf_norm
-   real(kind=R_GRID) :: l1_error, l1_norm
-   real(kind=R_GRID) :: l2_error, l2_norm
-   integer :: master, nprocs
-   character (len=128):: filename_error ! filename output
-
-   is  = bd%is
-   ie  = bd%ie
-   js  = bd%js
-   je  = bd%je
-
-   agrid => gridstruct%agrid_64
-
-   !if(mpp_pe()==0) print*, time, init_step_atmos
-   !if (init_step_atmos) then
-   !   call  calc_mass(gridstruct%m0, delp, bd, gridstruct)
-   !else
-   !   call  calc_mass(gridstruct%mf, delp, bd, gridstruct)
-   !endif
-   !if(mpp_pe()==0) print*, time, gridstruct%m0, gridstruct%mf, abs(gridstruct%mf-gridstruct%m0)/gridstruct%m0
-   ! A grid
-   do i = is, ie
-      do j = js, je
-         lon = agrid(i,j,1)
-         lat = agrid(i,j,2)
-         call compute_ref_adv_zonal_wind(delp_exact(i,j), lat, lon, time)
-      enddo
-   enddo
-
-   ! get error
-   error = delp_exact-delp
-
-   ! get norms
-   call calc_linf_norm(linf_norm , delp_exact, bd, 0, 0)
-   call calc_linf_norm(linf_error, error     , bd, 0, 0)
-   linf_error = linf_error/linf_norm
-
-   call calc_l1_norm(l1_norm , delp_exact, bd, gridstruct, 0, 0)
-   call calc_l1_norm(l1_error, error     , bd, gridstruct, 0, 0)
-   l1_error = l1_error/l1_norm
-
-   call calc_l2_norm(l2_norm , delp_exact, bd, gridstruct, 0, 0)
-   call calc_l2_norm(l2_error, error     , bd, gridstruct, 0, 0)
-   l2_error = l2_error/l2_norm
-
- 
-   master = mpp_root_pe()
-   if (mpp_pe()==master) then
-      !print*, linf_error, l1_error, l2_error
-      filename_error = "error_delp.txt"
-      ! open the file
-      if(init_step_atmos) then
-         open(59, file=filename_error, status='replace')
-      else
-         open(59, file=filename_error, status='old', position='append')
-      endif
-      write(59,*) linf_error, l1_error, l2_error
-      close(59)
-   endif
-end subroutine error_adv_zonal
-
-
-subroutine error_density(npz, nq, bd, q, flagstruct, gridstruct, domain, time, init_step_atmos)
-   !--------------------------------------------------
-   ! Compute the error of the advection problem when the zonal wind is used
-   !--------------------------------------------------
-   type(fv_grid_bounds_type), intent(IN) :: bd
-   real, intent(inout) :: q(   bd%isd:bd%ied  ,bd%jsd:bd%jed  ,npz, nq)  !
-   type(fv_flags_type), target, intent(IN) :: flagstruct
-   type(fv_grid_type), intent(INOUT), target :: gridstruct
-   type(domain2d), intent(INOUT) :: domain
-   real(kind=R_GRID) :: delp_exact(bd%isd:bd%ied  ,bd%jsd:bd%jed)
-   real(kind=R_GRID) :: error(bd%isd:bd%ied  ,bd%jsd:bd%jed)
-   real(kind=R_GRID), pointer, dimension(:,:,:)   :: agrid
-   real, intent(in)  ::   time
-   logical, intent(in) :: init_step_atmos
-   integer, intent(in) :: nq, npz
-
-   ! aux vars
-   real(kind=R_GRID) :: lat, lon
-
-   ! bounds
-   integer :: i, j
-   integer :: is, ie, js, je
-
-   real(kind=R_GRID) :: linf_error, linf_norm
-   real(kind=R_GRID) :: l1_error, l1_norm
-   real(kind=R_GRID) :: l2_error, l2_norm
-   integer :: master, nprocs
-   character (len=128):: filename_error ! filename output
-
-   is  = bd%is
-   ie  = bd%ie
-   js  = bd%js
-   je  = bd%je
-
-   agrid => gridstruct%agrid_64
-
-   !if(mpp_pe()==0) print*, time, init_step_atmos
-   !if (init_step_atmos) then
-   !   call  calc_mass(gridstruct%m0, delp, bd, gridstruct)
-   !else
-   !   call  calc_mass(gridstruct%mf, delp, bd, gridstruct)
-   !endif
-   !if(mpp_pe()==0) print*, time, gridstruct%m0, gridstruct%mf, abs(gridstruct%mf-gridstruct%m0)/gridstruct%m0
-   ! get error
-   error = q(:,:,1,1)-1.d0
-   delp_exact = 1.d0
-
-   ! get norms
-   call calc_linf_norm(linf_error, error     , bd, 0, 0)
-   linf_error = linf_error!/linf_norm
-
-   call calc_l1_norm(l1_norm , delp_exact, bd, gridstruct, 0, 0)
-   call calc_l1_norm(l1_error, error     , bd, gridstruct, 0, 0)
-   l1_error = l1_error/l1_norm
-
-   call calc_l2_norm(l2_norm , delp_exact, bd, gridstruct, 0, 0)
-   call calc_l2_norm(l2_error, error     , bd, gridstruct, 0, 0)
-   l2_error = l2_error/l2_norm
-
- 
-   master = mpp_root_pe()
-   if (mpp_pe()==master) then
-      !print*, linf_error, l1_error, l2_error
-      filename_error = "error_dens.txt"
-      ! open the file
-      if(init_step_atmos) then
-         open(59, file=filename_error, status='replace')
-      else
-         open(59, file=filename_error, status='old', position='append')
-      endif
-      write(59,*) linf_error, l1_error, l2_error
-      close(59)
-   endif
-end subroutine error_density
-
-
-
-subroutine error_divwind110(bd, delp, flagstruct, gridstruct, domain, time, init_step_atmos)
-   !--------------------------------------------------
-   ! Compute the error of the advection problem when the zonal wind is used
-   !--------------------------------------------------
-   type(fv_grid_bounds_type), intent(IN) :: bd
-   real ,      intent(INOUT) ::   delp(bd%isd:bd%ied,bd%jsd:bd%jed  )
-   type(fv_flags_type), target, intent(IN) :: flagstruct
-   type(fv_grid_type), intent(INOUT), target :: gridstruct
-   type(domain2d), intent(INOUT) :: domain
-   real(kind=R_GRID) :: delp_exact(bd%isd:bd%ied  ,bd%jsd:bd%jed)
-   real(kind=R_GRID) :: error_delp(bd%isd:bd%ied  ,bd%jsd:bd%jed)
-   real(kind=R_GRID), pointer, dimension(:,:,:)   :: agrid
-   real(kind=R_GRID), pointer, dimension(:,:,:)   :: cgrid
-   real(kind=R_GRID), pointer, dimension(:,:,:)   :: dgrid
-   real, intent(in)  ::   time
-   logical, intent(in) :: init_step_atmos
-
-   ! aux vars
-   real(kind=R_GRID) :: lat, lon
-
-   ! bounds
-   integer :: i, j
-   integer :: is, ie, js, je
-
-   real(kind=R_GRID) :: linf_error, linf_norm
-   real(kind=R_GRID) :: l1_error, l1_norm
-   real(kind=R_GRID) :: l2_error, l2_norm
-   integer :: master, nprocs
-   character (len=128):: filename_error ! filename output
-
-   is  = bd%is
-   ie  = bd%ie
-   js  = bd%js
-   je  = bd%je
-
-   agrid => gridstruct%agrid_64
-   cgrid => gridstruct%cgrid_64
-   dgrid => gridstruct%dgrid_64
-
-   !if(mpp_pe()==0) print*, time, init_step_atmos
-   !if (init_step_atmos) then
-   !   call  calc_mass(gridstruct%m0, delp, bd, gridstruct)
-   !else
-   !   call  calc_mass(gridstruct%mf, delp, bd, gridstruct)
-   !endif
-   !if(mpp_pe()==0) print*, time, gridstruct%m0, gridstruct%mf, abs(gridstruct%mf-gridstruct%m0)/gridstruct%m0
-   ! A grid
-   !do i = is, ie
-   !   do j = js, je
-   !      lon = agrid(i,j,1)
-   !      lat = agrid(i,j,2)
-   !   enddo
-   !enddo
-
-   ! get error
-   delp_exact = 1000.d0*grav
-   error_delp = delp_exact-delp
-
-   ! get norms
-   call calc_linf_norm(linf_norm , delp_exact, bd, 0, 0)
-   call calc_linf_norm(linf_error, error_delp, bd, 0, 0)
-   linf_error = linf_error/linf_norm
-
-   call calc_l1_norm(l1_norm , delp_exact, bd, gridstruct, 0, 0)
-   call calc_l1_norm(l1_error, error_delp, bd, gridstruct, 0, 0)
-   l1_error = l1_error/l1_norm
-
-   call calc_l2_norm(l2_norm , delp_exact, bd, gridstruct, 0, 0)
-   call calc_l2_norm(l2_error, error_delp, bd, gridstruct, 0, 0)
-   l2_error = l2_error/l2_norm
-
- 
-   master = mpp_root_pe()
-   if (mpp_pe()==master) then
-      filename_error = "error_delp.txt"
-      ! open the file
-      if(init_step_atmos) then
-         open(25, file=filename_error, status='replace')
-      else
-         open(25, file=filename_error, status='old', position='append')
-      endif
-      write(25,*) linf_error, l1_error, l2_error
-      close(25)
-      print*, linf_error, l1_error, l2_error
-   endif
-end subroutine error_divwind110
-
-
-
-subroutine compute_ref_adv_zonal_wind(delp, lat, lon, time)
-    !--------------------------------------------------
-    !
-    !--------------------------------------------------
-    real(kind=R_GRID), intent(out):: delp
-    real(kind=R_GRID), intent(in):: lat, lon, time
-    real(kind=R_GRID) :: e(3), ec(3), rot_e(3)
-    real(kind=R_GRID) :: X0, Y0, Z0
-    real(kind=R_GRID) :: rotX, rotY, rotZ
-    real(kind=R_GRID) :: ws, wt, Ubar, T
-    real(kind=R_GRID) :: cosa, cos2a, sina, sin2a, coswt, sinwt
-    real(kind=R_GRID) :: p(2), pc(2), rot_p(2), r, r0
-    real(kind=R_GRID) :: lon0, lat0, rlat, rlon
-
-    ! Period
-    T = 12.d0*86400.d0
-    Ubar = (2.d0*pi*radius)/T
-
-    ! get cartesian coordinates
-    p(1) = lon
-    p(2) = lat
-    call latlon2xyz(p, e)
-
-    if(test_case==1 .or. test_case==-3 .or. test_case==-4) then
-       ! Rotation parameters
-       ws = -Ubar/radius
-       wt = ws*time
-       cosa  = dcos(alpha)
-       cos2a = cosa*cosa
-       sina  = dsin(alpha)
-       sin2a = sina*sina
-       coswt = dcos(wt)
-       sinwt = dsin(wt)
-
-       ! apply the rotation matrix
-       rot_e(1) = (coswt*cos2a+sin2a)*e(1) -sinwt*cosa*e(2) + (coswt*cosa*sina-cosa*sina)*e(3)
-       rot_e(2) =  sinwt*cosa*e(1) + coswt*e(2) + sina*sinwt*e(3)
-       rot_e(3) = (coswt*sina*cosa-sina*cosa)*e(1) -sinwt*sina*e(2) + (coswt*sin2a+cos2a)*e(3)
-    endif
-
-    select case (test_case)
-       case(1)
-          ! cosine bell
-          ! test parameters
-          pc(1) = pi*0.25d0
-          pc(2) = pi*0.5d0 - dacos(1.d0/dsqrt(3.d0))
-          r0 = radius/3. !RADIUS radius/3.
-
-          ! convert rot_e to latlon
-          call cart_to_latlon(1, rot_e, rot_p(1), rot_p(2))
-
-          lon0 = pc(1)
-          lat0 = pc(2)
-          rlon = rot_p(1)
-          rlat = rot_p(2)
-
-          ! compute distance
-          r = great_circle_dist( rot_p, pc, radius )
-          r = 2.0*radius*dasin(dsqrt(dsin((rlat-lat0)/2)**2 + dcos(rlat)*dcos(lat0)*dsin((rlon-lon0)/2.)**2 ))
-          if (r < r0) then
-             delp = 0.5d0 + 0.5d0*(1.d0+cos(PI*r/r0))
-          else
-             delp = 0.5d0
-          endif
-          delp = delp*grav
-
-      case(-3)
-          ec(1) = 1.d0/dsqrt(3.d0)
-          ec(2) = ec(1)
-          ec(3) = ec(1)
-          delp = 0.1d0 + 0.9d0*dexp(-10.d0*((rot_e(1)-ec(1))**2+ (rot_e(2)-ec(2))**2 + (rot_e(3)-ec(2))**2))
-          delp = delp*grav
-
-      case(-4)
-         Ubar = (2.0*pi*radius)/(12.d0*86400.d0)
-         delp = 2.94e4 - (radius*omega*Ubar + (Ubar*Ubar)/2.) * &
-                      ( -1.*dcos(lon)*dcos(lat)*sin(alpha) + &
-                      dsin(lat)*dcos(alpha) ) ** 2.0
-          delp = delp*grav
-
-      case(2)
-         Ubar = (2.0*pi*radius)/(12.d0*86400.d0)
-         delp = 2.94e4 - (radius*omega*Ubar + (Ubar*Ubar)/2.) * &
-                      ( -1.*dcos(lon)*dcos(lat)*sin(alpha) + &
-                      dsin(lat)*dcos(alpha) ) ** 2.0
- 
-      case default
-         print*, 'Invalid test_case in compute_ref_adv_zonal_wind.'
-         stop
-    end select
-
-end subroutine compute_ref_adv_zonal_wind
-
-subroutine calc_linf_norm(linfnorm, field, bd, istag, jstag)
-   !--------------------------------------------------
-   ! Compute the linf norm
-   !--------------------------------------------------
-   type(fv_grid_bounds_type), intent(IN) :: bd
-   integer, intent(IN) :: istag, jstag
-   real,  intent(INOUT) :: field(bd%isd:bd%ied+jstag,bd%jsd:bd%jed+istag)
-   real,  intent(INOUT) :: linfnorm
-
-   ! bounds
-   integer :: i, j
-   integer :: is, ie, js, je
-
-   real(kind=R_GRID), allocatable :: linf_norms (:)
-   real(kind=R_GRID) :: linf_norm(1)
-   integer :: master, nprocs
-
-   is  = bd%is
-   ie  = bd%ie
-   js  = bd%js
-   je  = bd%je
-
-   linf_norm  = maxval(abs(field(is:ie,js:je)))
-
-   ! Get maximum among all processes
-   master = mpp_root_pe()
-   nprocs = mpp_npes()
-   if (mpp_pe()==master) then
-      allocate(linf_norms (0:nprocs-1))
-      linf_norms(master) = linf_norm(1)
-      do i = 0, nprocs-1
-         if(i .ne. master )then
-            call mpp_recv(linf_norm , size(linf_norm ) , from_pe=i)
-            linf_norms(i) = linf_norm(1)
-         endif
-      enddo
-      linf_norm(1) = maxval(linf_norms)
-      deallocate(linf_norms)
-
-      ! send the norm to other processes
-      do i = 0, nprocs-1
-         if(i .ne. master )then
-            call mpp_send(linf_norm , size(linf_norm ) , to_pe=i)
-         endif
-      enddo
- 
-   else
-      call mpp_send(linf_norm , size(linf_norm ) , to_pe=master)
-      call mpp_recv(linf_norm , size(linf_norm ) , from_pe=master)
-   endif
-   linfnorm = linf_norm(1)
-end subroutine calc_linf_norm
-
-
-
-subroutine calc_mass(mass, field, bd, gridstruct)
-   !--------------------------------------------------
-   ! Compute mass
-   !--------------------------------------------------
-   type(fv_grid_bounds_type), intent(IN) :: bd
-   type(fv_grid_type), intent(INOUT), target :: gridstruct
-   real,  intent(INOUT) :: field(bd%isd:bd%ied,bd%jsd:bd%jed)
-   real,  intent(INOUT) :: mass
-
-   ! bounds
-   integer :: i, j
-   integer :: is, ie, js, je
-
-   real(kind=R_GRID), allocatable :: masses (:)
-   real(kind=R_GRID) :: mass1(1)
-   integer :: master, nprocs
-
-   is  = bd%is
-   ie  = bd%ie
-   js  = bd%js
-   je  = bd%je
-
-   mass1(1) = sum((field(is:ie,js:je))*gridstruct%area(is:ie,js:je))
-
-   ! Get maximum among all processes
-   master = mpp_root_pe()
-   nprocs = mpp_npes()
-   if (mpp_pe()==master) then
-      allocate(masses (0:nprocs-1))
-      masses(master) = mass1(1)
-      do i = 0, nprocs-1
-         if(i .ne. master )then
-            call mpp_recv(mass1 , size(mass1) , from_pe=i)
-            masses(i) = mass1(1)
-         endif
-      enddo
-      mass1(1) = sum(masses)
-      deallocate(masses)
-
-      ! send the norm to other processes
-      do i = 0, nprocs-1
-         if(i .ne. master )then
-            call mpp_send(mass1 , size(mass1) , to_pe=i)
-         endif
-      enddo
- 
-   else
-      call mpp_send(mass1 , size(mass1) , to_pe=master)
-      call mpp_recv(mass1 , size(mass1) , from_pe=master)
-   endif
-   mass = mass1(1)
-end subroutine calc_mass
-
-
-subroutine calc_l1_norm(l1norm, field, bd, gridstruct, istag, jstag)
-   !--------------------------------------------------
-   ! Compute the l1 norm
-   !--------------------------------------------------
-   type(fv_grid_bounds_type), intent(IN) :: bd
-   integer, intent(IN) :: istag, jstag
-   type(fv_grid_type), intent(INOUT), target :: gridstruct
-   real,  intent(INOUT) :: field(bd%isd:bd%ied+jstag,bd%jsd:bd%jed+istag)
-   real,  intent(INOUT) :: l1norm
-
-   ! bounds
-   integer :: i, j
-   integer :: is, ie, js, je
-
-   real(kind=R_GRID), allocatable :: l1_norms (:)
-   real(kind=R_GRID) :: l1_norm(1)
-   integer :: master, nprocs
-
-   is  = bd%is
-   ie  = bd%ie
-   js  = bd%js
-   je  = bd%je
-
-   l1_norm = sum(abs(field(is:ie,js:je))*gridstruct%area(is:ie,js:je))
-
-   ! Get maximum among all processes
-   master = mpp_root_pe()
-   nprocs = mpp_npes()
-   if (mpp_pe()==master) then
-      allocate(l1_norms (0:nprocs-1))
-      l1_norms(master) = l1_norm(1)
-      do i = 0, nprocs-1
-         if(i .ne. master )then
-            call mpp_recv(l1_norm , size(l1_norm ) , from_pe=i)
-            l1_norms(i) = l1_norm(1)
-         endif
-      enddo
-      l1_norm(1) = sum(l1_norms)
-      deallocate(l1_norms)
-
-      ! send the norm to other processes
-      do i = 0, nprocs-1
-         if(i .ne. master )then
-            call mpp_send(l1_norm , size(l1_norm ) , to_pe=i)
-         endif
-      enddo
- 
-   else
-      call mpp_send(l1_norm , size(l1_norm ) , to_pe=master)
-      call mpp_recv(l1_norm , size(l1_norm ) , from_pe=master)
-   endif
-   l1norm = l1_norm(1)
-end subroutine calc_l1_norm
-
-
-subroutine calc_l2_norm(l2norm, field, bd, gridstruct, istag, jstag)
-   !--------------------------------------------------
-   ! Compute the l2 norm
-   !--------------------------------------------------
-   type(fv_grid_bounds_type), intent(IN) :: bd
-   integer, intent(IN) :: istag, jstag
-   type(fv_grid_type), intent(INOUT), target :: gridstruct
-   real,  intent(INOUT) :: field(bd%isd:bd%ied+jstag,bd%jsd:bd%jed+istag)
-   real,  intent(INOUT) :: l2norm
-
-   ! bounds
-   integer :: i, j
-   integer :: is, ie, js, je
-
-   real(kind=R_GRID), allocatable :: l2_norms (:)
-   real(kind=R_GRID) :: l2_norm(1)
-   integer :: master, nprocs
-
-   is  = bd%is
-   ie  = bd%ie
-   js  = bd%js
-   je  = bd%je
-
-   l2_norm = sum(field(is:ie,js:je)*field(is:ie,js:je)*gridstruct%area(is:ie,js:je))
-
-   ! Get maximum among all processes
-   master = mpp_root_pe()
-   nprocs = mpp_npes()
-   if (mpp_pe()==master) then
-      allocate(l2_norms (0:nprocs-1))
-      l2_norms(master) = l2_norm(1)
-      do i = 0, nprocs-1
-         if(i .ne. master )then
-            call mpp_recv(l2_norm , size(l2_norm ) , from_pe=i)
-            l2_norms(i) = l2_norm(1)
-         endif
-      enddo
-      l2_norm(1) = sqrt(sum(l2_norms))
-      deallocate(l2_norms)
-
-      ! send the norm to other processes
-      do i = 0, nprocs-1
-         if(i .ne. master )then
-            call mpp_send(l2_norm , size(l2_norm ) , to_pe=i)
-         endif
-      enddo
- 
-   else
-      call mpp_send(l2_norm , size(l2_norm ) , to_pe=master)
-      call mpp_recv(l2_norm , size(l2_norm ) , from_pe=master)
-   endif
-   l2norm = l2_norm(1)
-end subroutine calc_l2_norm
-
- subroutine xppm(q_R, q_L, q, iord, is,ie,isd,ied, je,js,jsd,jed, npx, npy, dxa, bounded_domain, grid_type)
- integer, INTENT(IN) :: is, ie, isd, ied, js, je, jsd, jed
- integer, INTENT(IN) :: iord
- integer, INTENT(IN) :: npx, npy
- real   , INTENT(IN) :: q(isd:ied,jsd:jed)
- real   , intent(IN) :: dxa(isd:ied,jsd:jed)
- logical, intent(IN) :: bounded_domain
- integer, intent(IN) :: grid_type
-! !OUTPUT PARAMETERS:
- real  , INTENT(OUT) :: q_R(is:ie,js:je) !  q at c grid
- real  , INTENT(OUT) :: q_L(is:ie,js:je) !  q at c grid
-! Local
- real, dimension(is-1:ie+1):: bl, br, b0, a4, da1
- real:: q1(isd:ied)
- real, dimension(is:ie+1):: fx0, fx1, xt1
- logical, dimension(is-1:ie+1):: ext5, ext6, smt5, smt6
- logical, dimension(is:ie+1):: hi5, hi6
- real  al(is-1:ie+2)
- real  dm(is-2:ie+2)
- real  dq(is-3:ie+2)
- integer:: i, j, ie3, is1, ie1, mord
- real:: x0, x1, xt, qtmp, pmp_1, lac_1, pmp_2, lac
- real, parameter:: p1 =  7./12.
- real, parameter:: p2 = -1./12.
-! Non-monotonic
- real, parameter:: c1 = -2./14.
- real, parameter:: c2 = 11./14.
- real, parameter:: c3 =  5./14.
- real, parameter:: r3 = 1./3.
- real, parameter:: s11 = 11./14., s14 = 4./7.,    s15=3./14.
- real, parameter:: r12 = 1./12.
-!
-
- if ( .not. bounded_domain .and. grid_type<3 ) then
-    is1 = max(3,is-1);  ie3 = min(npx-2,ie+2)
-                        ie1 = min(npx-3,ie+1)
- else
-    is1 = is-1;         ie3 = ie+2
-                        ie1 = ie+1
- end if
-
- mord = abs(iord)
-
- do j=js,je
-    do i=isd, ied
-       q1(i) = q(i,j)
-    enddo
-
-    if (iord==0) then
-       do i=is1, ie3
-         al(i) = p1*(q1(i-1)+q1(i)) + p2*(q1(i-2)+q1(i+1))
-       enddo
-
-       if ( .not.bounded_domain .and. grid_type<3 ) then
-         if ( is==1 ) then
-           al(0) = c1*q1(-2) + c2*q1(-1) + c3*q1(0)
-           al(1) = 0.5*(((2.*dxa(0,j)+dxa(-1,j))*q1(0)-dxa(0,j)*q1(-1))/(dxa(-1,j)+dxa(0,j)) &
-                 +      ((2.*dxa(1,j)+dxa( 2,j))*q1(1)-dxa(1,j)*q1( 2))/(dxa(1, j)+dxa(2,j)))
-           al(2) = c3*q1(1) + c2*q1(2) +c1*q1(3)
-         endif
-         if ( (ie+1)==npx ) then
-           al(npx-1) = c1*q1(npx-3) + c2*q1(npx-2) + c3*q1(npx-1)
-           al(npx) = 0.5*(((2.*dxa(npx-1,j)+dxa(npx-2,j))*q1(npx-1)-dxa(npx-1,j)*q1(npx-2))/(dxa(npx-2,j)+dxa(npx-1,j)) &
-                     +      ((2.*dxa(npx,  j)+dxa(npx+1,j))*q1(npx  )-dxa(npx,  j)*q1(npx+1))/(dxa(npx,  j)+dxa(npx+1,j)))
-           al(npx+1) = c3*q1(npx) + c2*q1(npx+1) + c1*q1(npx+2)
-         endif
-       endif
-
-      do i=is1, ie1
-        bl(i) =  al(i)-q1(i)
-        br(i) =  al(i+1)-q1(i)
-      enddo
-
-    else if (iord==8) then
-       do i=is-2,ie+2
-             xt = 0.25*(q1(i+1) - q1(i-1))
-          dm(i) = sign(min(abs(xt), max(q1(i-1), q1(i), q1(i+1)) - q1(i),  &
-                            q1(i) - min(q1(i-1), q1(i), q1(i+1))), xt)
-       enddo
-       do i=is1,ie1+1
-          al(i) = 0.5*(q1(i-1)+q1(i)) + r3*(dm(i-1)-dm(i))
-       enddo
-
-       do i=is1, ie1
-          xt = 2.*dm(i)
-          bl(i) = -sign(min(abs(xt), abs(al(i  )-q1(i))), xt)
-          br(i) =  sign(min(abs(xt), abs(al(i+1)-q1(i))), xt)
-       enddo
-
-
-       if (.not. bounded_domain .and. grid_type<3) then
-         if ( is==1 ) then
-            bl(0) = s14*dm(-1) + s11*(q1(-1)-q1(0))
-
-            xt = 0.5*(((2.*dxa(0,j)+dxa(-1,j))*q1(0)-dxa(0,j)*q1(-1))/(dxa(-1,j)+dxa(0,j)) &
-               +      ((2.*dxa(1,j)+dxa( 2,j))*q1(1)-dxa(1,j)*q1( 2))/(dxa(1, j)+dxa(2,j)))
-   !        if ( iord==8 .or. iord==10 ) then
-               xt = max(xt, min(q1(-1),q1(0),q1(1),q1(2)))
-               xt = min(xt, max(q1(-1),q1(0),q1(1),q1(2)))
-   !        endif
-            br(0) = xt - q1(0)
-            bl(1) = xt - q1(1)
-            xt = s15*q1(1) + s11*q1(2) - s14*dm(2)
-            br(1) = xt - q1(1)
-            bl(2) = xt - q1(2)
-
-            br(2) = al(3) - q1(2)
-            call pert_ppm(3, q1(0), bl(0), br(0), 1)
-         endif
-         if ( (ie+1)==npx ) then
-            bl(npx-2) = al(npx-2) - q1(npx-2)
-
-            xt = s15*q1(npx-1) + s11*q1(npx-2) + s14*dm(npx-2)
-            br(npx-2) = xt - q1(npx-2)
-            bl(npx-1) = xt - q1(npx-1)
-
-            xt = 0.5*(((2.*dxa(npx-1,j)+dxa(npx-2,j))*q1(npx-1)-dxa(npx-1,j)*q1(npx-2))/(dxa(npx-2,j)+dxa(npx-1,j)) &
-               +      ((2.*dxa(npx,  j)+dxa(npx+1,j))*q1(npx  )-dxa(npx,  j)*q1(npx+1))/(dxa(npx,  j)+dxa(npx+1,j)))
-   !        if ( iord==8 .or. iord==10 ) then
-               xt = max(xt, min(q1(npx-2),q1(npx-1),q1(npx),q1(npx+1)))
-               xt = min(xt, max(q1(npx-2),q1(npx-1),q1(npx),q1(npx+1)))
-   !        endif
-            br(npx-1) = xt - q1(npx-1)
-            bl(npx  ) = xt - q1(npx  )
-
-            br(npx) = s11*(q1(npx+1)-q1(npx)) - s14*dm(npx+1)
-            call pert_ppm(3, q1(npx-2), bl(npx-2), br(npx-2), 1)
-         endif
-
-       endif
-
-    endif
-
-    do i=is,ie
-       q_L(i,j) = br(i)+q1(i)
-       q_R(i,j) = bl(i)+q1(i)
-    enddo
- 
- enddo
-
- end subroutine xppm
-
- subroutine yppm(q_R, q_L, q, jord, is,ie,isd,ied, js,je,jsd,jed, npx, npy, dya, bounded_domain, grid_type)
- integer, INTENT(IN) :: is, ie, isd, ied, js, je, jsd, jed
- integer, INTENT(IN) :: jord
- integer, INTENT(IN) :: npx, npy
- real   , INTENT(IN) :: q(isd:ied,jsd:jed)
-! !OUTPUT PARAMETERS:
- real  , INTENT(OUT) :: q_R(is:ie,js:je) !  q at d grid
- real  , INTENT(OUT) :: q_L(is:ie,js:je) !  q at d grid
-!
- real   , intent(IN) :: dya(isd:ied,jsd:jed)
- logical, intent(IN) :: bounded_domain
- integer, intent(IN) :: grid_type
-! Local:
- real:: dm(is:ie,js-2:je+2)
- real:: al(is:ie,js-1:je+2)
- real, dimension(is:ie,js-1:je+1):: bl, br, b0
- real:: dq(is:ie,js-3:je+2)
- integer:: i, j, js1, je3, je1, mord
- real,    dimension(is:ie):: fx0, fx1, xt1, a4
- logical, dimension(is:ie,js-1:je+1):: smt5, smt6
- logical, dimension(is:ie):: hi5, hi6
- real:: x0, xt, qtmp, pmp_1, lac_1, pmp_2, lac_2
- real, parameter:: p1 =  7./12.
- real, parameter:: p2 = -1./12.
-! Non-monotonic
- real, parameter:: c1 = -2./14.
- real, parameter:: c2 = 11./14.
- real, parameter:: c3 =  5./14.
- real, parameter:: r3 = 1./3.
- real, parameter:: s11 = 11./14., s14 = 4./7.,    s15=3./14.
- real, parameter:: r12 = 1./12.
-
-   if ( .not.bounded_domain .and. grid_type < 3 ) then
-! Cubed-sphere:
-      js1 = max(3,js-1); je3 = min(npy-2,je+2)
-                         je1 = min(npy-3,je+1)
-   else
-! Bounded_domain grid OR Doubly periodic domain:
-      js1 = js-1;        je3 = je+2
-                         je1 = je+1
-   endif
-
- mord = abs(jord)
-if (jord==0) then
-   do i=is,ie
-      do j=js1, je3
-         al(i,j) = p1*(q(i,j-1)+q(i,j)) + p2*(q(i,j-2)+q(i,j+1))
-      enddo
-   enddo
-
-   if ( .not. bounded_domain .and. grid_type<3 ) then
-      if( js==1 ) then
-        do i=is, ie
-           al(i,0) = c1*q(i,-2) + c2*q(i,-1) + c3*q(i,0)
-           al(i,1) = 0.5*(((2.*dya(i,0)+dya(i,-1))*q(i,0)-dya(i,0)*q(i,-1))/(dya(i,-1)+dya(i,0))   &
-                   +      ((2.*dya(i,1)+dya(i,2))*q(i,1)-dya(i,1)*q(i,2))/(dya(i,1)+dya(i,2)))
-           al(i,2) = c3*q(i,1) + c2*q(i,2) + c1*q(i,3)
-        enddo
-      endif
-      if( (je+1)==npy ) then
-        do i=is,ie
-         al(i,npy-1) = c1*q(i,npy-3) + c2*q(i,npy-2) + c3*q(i,npy-1)
-         al(i,npy) = 0.5*(((2.*dya(i,npy-1)+dya(i,npy-2))*q(i,npy-1)-dya(i,npy-1)*q(i,npy-2))/(dya(i,npy-2)+dya(i,npy-1))  &
-                   +      ((2.*dya(i,npy)+dya(i,npy+1))*q(i,npy)-dya(i,npy)*q(i,npy+1))/(dya(i,npy)+dya(i,npy+1)))
-         al(i,npy+1) = c3*q(i,npy) + c2*q(i,npy+1) + c1*q(i,npy+2)
-        enddo
-      endif
-   endif
-
-   do i=is,ie
-      do j=js1, je1
-         bl(i,j) =  al(i,j  )-q(i,j)
-         br(i,j) =  al(i,j+1)-q(i,j)
-      enddo
-   enddo
-
-
-else if(jord==8) then
-! Monotonic constraints:
-! ord = 8: PPM with Lin's PPM fast monotone constraint
-! ord > 8: PPM with Lin's modification of Huynh 2nd constraint
-
-  do j=js-2,je+2
-     do i=is,ie
-             xt = 0.25*(q(i,j+1) - q(i,j-1))
-        dm(i,j) = sign(min(abs(xt), max(q(i,j-1), q(i,j), q(i,j+1)) - q(i,j),   &
-                           q(i,j) - min(q(i,j-1), q(i,j), q(i,j+1))), xt)
-     enddo
-  enddo
-  do j=js1,je1+1
-     do i=is,ie
-        al(i,j) = 0.5*(q(i,j-1)+q(i,j)) + r3*(dm(i,j-1) - dm(i,j))
-     enddo
-  enddo
-
-  do j=js1,je1
-     do i=is,ie
-        xt = 2.*dm(i,j)
-        bl(i,j) = -sign(min(abs(xt), abs(al(i,j)-q(i,j))),   xt)
-        br(i,j) =  sign(min(abs(xt), abs(al(i,j+1)-q(i,j))), xt)
-     enddo
-  enddo
-
-  if (.not. bounded_domain .and. grid_type<3) then
-    if( js==1 ) then
-      do i=is, ie
-         bl(i,0) = s14*dm(i,-1) + s11*(q(i,-1)-q(i,0))
-
-         xt = 0.5*(((2.*dya(i,0)+dya(i,-1))*q(i,0)-dya(i,0)*q(i,-1))/(dya(i,-1)+dya(i,0))   &
-            +      ((2.*dya(i,1)+dya(i,2))*q(i,1)-dya(i,1)*q(i,2))/(dya(i,1)+dya(i,2)))
-!        if ( jord==8 .or. jord==10 ) then
-            xt = max(xt, min(q(i,-1),q(i,0),q(i,1),q(i,2)))
-            xt = min(xt, max(q(i,-1),q(i,0),q(i,1),q(i,2)))
-!        endif
-         br(i,0) = xt - q(i,0)
-         bl(i,1) = xt - q(i,1)
-
-         xt = s15*q(i,1) + s11*q(i,2) - s14*dm(i,2)
-         br(i,1) = xt - q(i,1)
-         bl(i,2) = xt - q(i,2)
-
-         br(i,2) = al(i,3) - q(i,2)
-      enddo
-      call pert_ppm(3*(ie-is+1), q(is,0), bl(is,0), br(is,0), 1)
-    endif
-    if( (je+1)==npy ) then
-      do i=is, ie
-         bl(i,npy-2) = al(i,npy-2) - q(i,npy-2)
-
-         xt = s15*q(i,npy-1) + s11*q(i,npy-2) + s14*dm(i,npy-2)
-         br(i,npy-2) = xt - q(i,npy-2)
-         bl(i,npy-1) = xt - q(i,npy-1)
-
-         xt = 0.5*(((2.*dya(i,npy-1)+dya(i,npy-2))*q(i,npy-1)-dya(i,npy-1)*q(i,npy-2))/(dya(i,npy-2)+dya(i,npy-1))  &
-            +      ((2.*dya(i,npy)+dya(i,npy+1))*q(i,npy)-dya(i,npy)*q(i,npy+1))/(dya(i,npy)+dya(i,npy+1)))
-!        if ( jord==8 .or. jord==10 ) then
-            xt = max(xt, min(q(i,npy-2),q(i,npy-1),q(i,npy),q(i,npy+1)))
-            xt = min(xt, max(q(i,npy-2),q(i,npy-1),q(i,npy),q(i,npy+1)))
-!        endif
-         br(i,npy-1) = xt - q(i,npy-1)
-         bl(i,npy  ) = xt - q(i,npy)
-
-         br(i,npy) = s11*(q(i,npy+1)-q(i,npy)) - s14*dm(i,npy+1)
-     enddo
-     call pert_ppm(3*(ie-is+1), q(is,npy-2), bl(is,npy-2), br(is,npy-2), 1)
-    endif
-
- end if
-
-
-endif
-
-do i=is, ie
-   do j=js, je
-      q_L(i,j) = br(i,j)+q(i,j)
-      q_R(i,j) = bl(i,j)+q(i,j)
-   enddo
-enddo
-
-
-
- end subroutine yppm
-
-
-
-
-
- subroutine pert_ppm(im, a0, al, ar, iv)
- integer, intent(in):: im
- integer, intent(in):: iv
- real, intent(in)   :: a0(im)
- real, intent(inout):: al(im), ar(im)
-! Local:
- real a4, da1, da2, a6da, fmin
- real, parameter:: r12 = 1./12.
-!
- integer i
-
-!-----------------------------------
-! Optimized PPM in perturbation form:
-!-----------------------------------
-
- if ( iv==0 ) then
-! Positive definite constraint
-    do i=1,im
-     if ( a0(i) <= 0. ) then
-          al(i) = 0.
-          ar(i) = 0.
-     else
-        a4 = -3.*(ar(i) + al(i))
-       da1 =      ar(i) - al(i)
-      if( abs(da1) < -a4 ) then
-         fmin = a0(i) + 0.25/a4*da1**2 + a4*r12
-         if( fmin < 0. ) then
-             if( ar(i)>0. .and. al(i)>0. ) then
-                 ar(i) = 0.
-                 al(i) = 0.
-             elseif( da1 > 0. ) then
-                 ar(i) = -2.*al(i)
-             else
-                 al(i) = -2.*ar(i)
-             endif
-         endif
-      endif
-     endif
-    enddo
- else
-! Standard PPM constraint
-    do i=1,im
-       if ( al(i)*ar(i) < 0. ) then
-            da1 = al(i) - ar(i)
-            da2 = da1**2
-            a6da = 3.*(al(i)+ar(i))*da1
-! abs(a6da) > da2 --> 3.*abs(al+ar) > abs(al-ar)
-            if( a6da < -da2 ) then
-                ar(i) = -2.*al(i)
-            elseif( a6da > da2 ) then
-                al(i) = -2.*ar(i)
-            endif
-       else
-! effect of dm=0 included here
-            al(i) = 0.
-            ar(i) = 0.
-       endif
-  enddo
- endif
-
- end subroutine pert_ppm
 
 
 end module test_cases_mod

@@ -96,7 +96,7 @@ module global_grid_mod
       kik_c2l, kik_l2c
 
     !--- k2e rmp parameter
-    integer :: k2e_nord = 4
+    integer :: k2e_nord = 2
     integer, dimension(:, :, :), allocatable :: k2e_loc
     real(kind=R_GRID), dimension(:, :, :, :), allocatable :: k2e_coef
     integer, dimension(:, :, :), allocatable :: k2e_loc_b

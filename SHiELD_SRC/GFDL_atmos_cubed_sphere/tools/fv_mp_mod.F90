@@ -275,7 +275,7 @@ contains
 !     domain_decomp :: Setup domain decomp
 !
       subroutine domain_decomp(grid_num,npx,npy,nregions,grid_type,nested,layout,io_layout,bd,tile,square_domain,&
-           npes_per_tile,domain,domain_for_coupler,domain_for_duo,domain_for_duo2, domain_for_read,num_contact,pelist)
+           npes_per_tile,domain,domain_for_coupler,domain_for_duo,domain_for_read,num_contact,pelist)
 
          integer, intent(IN)  :: grid_num
          integer, intent(IN)  :: npx,npy,grid_type
@@ -297,7 +297,7 @@ contains
          integer, intent(INOUT) :: pelist(:)
          integer, intent(OUT) :: num_contact, npes_per_tile
          logical, intent(OUT) :: square_domain
-         type(domain2D), intent(OUT) :: domain, domain_for_coupler, domain_for_duo, domain_for_duo2, domain_for_read
+         type(domain2D), intent(OUT) :: domain, domain_for_coupler, domain_for_duo, domain_for_read
          type(fv_grid_bounds_type), intent(INOUT) :: bd
          integer :: l_layout(2)
 
@@ -563,16 +563,10 @@ contains
                  istart1, iend1, jstart1, jend1, istart2, iend2, jstart2, jend2,                  &
                  pe_start=pe_start, pe_end=pe_end, symmetry=is_symmetry,                          &
                  shalo = ng+1, nhalo = ng+1, whalo = ng+1, ehalo = ng+1, tile_id=tile_id, name = type)
-            call mpp_define_mosaic(global_indices, layout2D, domain_for_duo2, nregions, num_contact, tile1, tile2, &
-                 istart1, iend1, jstart1, jend1, istart2, iend2, jstart2, jend2,                  &
-                 pe_start=pe_start, pe_end=pe_end, symmetry=is_symmetry,                          &
-                 shalo = ng+2, nhalo = ng+2, whalo = ng+2, ehalo = ng+2, tile_id=tile_id, name = type)
-
             deallocate(tile_id)
             call mpp_define_io_domain(domain, io_layout)
             call mpp_define_io_domain(domain_for_coupler, io_layout)
             call mpp_define_io_domain(domain_for_duo, io_layout)
-            call mpp_define_io_domain(domain_for_duo2, io_layout)
 
             !--- create a read domain that can be used to improve read performance
             !--- if io_layout=(1,1) then read io_layout=layout (all read)

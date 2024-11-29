@@ -32,8 +32,10 @@ module duogrid_mod
 
   use mpp_domains_mod, only: mpp_update_domains
 
-  use lib_grid_mod, only: R_GRID, RADIUS
-  use lib_grid_mod, only: lib_4pt_area
+  !use lib_grid_mod, only: R_GRID, RADIUS
+  !use lib_grid_mod, only: lib_4pt_area
+
+  use fv_arrays_mod, only: R_GRID
 
   use global_grid_mod, only: global_grid_type
   use global_grid_mod, only: global_grid_init, global_grid_end
@@ -44,32 +46,46 @@ module duogrid_mod
 
   use mpp_parameter_mod, only: DGRID_NE, BGRID_NE, BGRID_SW, AGRID, SCALAR_PAIR, NORTH, EAST, WEST, SOUTH, CGRID_NE
 
-  !use fv_grid_utils_mod, only: mid_pt_cart, latlon2xyz, vect_cross, normalize_vect
+  ! use fv_grid_utils_mod, only: mid_pt_cart, latlon2xyz, vect_cross, normalize_vect
   implicit none
 
   private
+
+#ifdef NO_QUAD_PRECISION
+! 64-bit precision (kind=8)
+  integer, parameter:: f_p = selected_real_kind(15)
+#else
+! Higher precision (kind=16) for grid geometrical factors:
+  integer, parameter:: f_p = selected_real_kind(20)
+#endif
 
   public :: duogrid_init
   public :: duogrid_end
   public :: ext_scalar
   public :: ext_vector
-  public :: fill_corner_region, lagrange_poly_interp
+!  public :: fill_corner_region, lagrange_poly_interp
+!  public :: cubed_a2d_halo
 
-  interface fill_corner_region
-    module procedure fill_corner_region_2d
-    module procedure fill_corner_region_3d
-    module procedure fill_corner_region_4d
-  end interface fill_corner_region
-  interface lagrange_poly_interp
-    module procedure lagrange_poly_interp_2d
-    module procedure lagrange_poly_interp_3d
-    module procedure lagrange_poly_interp_4d
-  end interface lagrange_poly_interp
-
-  interface fill_corners_domain_decomp
-    module procedure fill_corners_domain_decomp_2d
-    module procedure fill_corners_domain_decomp_3d
-  end interface fill_corners_domain_decomp
+!  interface fill_corner_region
+!    module procedure fill_corner_region_2d
+!    module procedure fill_corner_region_3d
+!    module procedure fill_corner_region_4d
+!  end interface fill_corner_region
+!  interface lagrange_poly_interp
+!    module procedure lagrange_poly_interp_2d
+!    module procedure lagrange_poly_interp_3d
+!    module procedure lagrange_poly_interp_4d
+!  end interface lagrange_poly_interp
+!
+!  interface fill_corners_domain_decomp
+!    module procedure fill_corners_domain_decomp_2d
+!    module procedure fill_corners_domain_decomp_3d
+!  end interface fill_corners_domain_decomp
+!
+  interface fill_buff_corners_domain_decomp
+    module procedure fill_buff_corners_domain_decomp_2d
+    module procedure fill_buff_corners_domain_decomp_3d
+  end interface fill_buff_corners_domain_decomp
 
   interface ext_scalar
     module procedure ext_scalar_2d
@@ -119,11 +135,14 @@ contains
 
     !--- lagrange corners coeff
     !call compute_lagrange_coeff(atm%gridstruct%dg%ss_store, atm%bd, atm%gridstruct%dg)
-    call compute_lagrange_coeff(atm%gridstruct%dg%xp, atm%gridstruct%dg%xm, &
-                                atm%gridstruct%dg%yp, atm%gridstruct%dg%ym, atm%bd, atm%gridstruct%dg)
+! extrapolation for divergence
+    call compute_lagrange_coeff_extra(atm%gridstruct%dg%xp3, atm%gridstruct%dg%xm3, &
+                                      atm%gridstruct%dg%yp3, atm%gridstruct%dg%ym3, atm%bd, atm%gridstruct%dg, gg)
+    call compute_lagrange_coeff_extra(atm%gridstruct%dg%xp, atm%gridstruct%dg%xm, &
+                                      atm%gridstruct%dg%yp, atm%gridstruct%dg%ym, atm%gridstruct%dg%bd, atm%gridstruct%dg, gg)
 
     !--- end global_grid
-    call global_grid_end(gg)
+    !call global_grid_end(gg)
 
     !--- set status
     atm%gridstruct%dg%is_initialized = .true.
@@ -238,6 +257,7 @@ contains
         ! point
         ii = i*2; jj = j*2
         dg%a_pt(:, i, j) = gg%pt_ext(:, ii, jj, n)
+        dg%a_kik(:, i, j) = gg%pt_kik(:, ii, jj, n)
         dg%a_x(i, j) = gg%ext_x(ii, jj, n)
         dg%a_y(i, j) = gg%ext_y(ii, jj, n)
 
@@ -325,16 +345,16 @@ contains
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 !#define a_grid_recalculate
-#ifdef a_grid_recalculate
-    do j = jsd, jed
-      do i = isd, ied
-        dg%a_da(i, j) = lib_4pt_area( &
-                        dg%b_pt(:, i, j), dg%b_pt(:, i + 1, j), dg%b_pt(:, i + 1, j + 1), dg%b_pt(:, i, j + 1), &
-                        RADIUS)
-        dg%rda(i, j) = 1.0/dg%a_da(i, j)
-      end do
-    end do
-#endif
+!#ifdef a_grid_recalculate
+!    do j = jsd, jed
+!      do i = isd, ied
+!        dg%a_da(i, j) = lib_4pt_area( &
+!                        dg%b_pt(:, i, j), dg%b_pt(:, i + 1, j), dg%b_pt(:, i + 1, j + 1), dg%b_pt(:, i, j + 1), &
+!                        RADIUS)
+!        dg%rda(i, j) = 1.0/dg%a_da(i, j)
+!      end do
+!    end do
+!#endif
 
 !TO CHECK: revisit the c/d grid assignement for some variables
     !--- assign c-grid
@@ -459,46 +479,38 @@ contains
     type(fv_grid_bounds_type), intent(IN) :: bd
     integer, intent(IN) :: istag, jstag
     real, dimension(:, :) :: var
-
-    integer, dimension(:, :), allocatable :: k2e_loc_u
-    real(kind=R_GRID), dimension(:, :, :), allocatable :: k2e_coef_u
     integer :: isd, ied, jsd, jed, i, j
+    integer, dimension(bd%isd:bd%ied, bd%jsd:bd%jed) :: k2e_loc_u, k2e_loc_v
+    real(kind=R_GRID), dimension(dg%k2e_nord, bd%isd:bd%ied, bd%jsd:bd%jed) :: k2e_coef_u, k2e_coef_v
+    real, dimension(bd%isd:bd%ied, bd%je:bd%jed) :: S_N
+    real, dimension(bd%isd:bd%ied, bd%jsd:bd%js) :: S_S
+    real, dimension(bd%ie:bd%ied, bd%jsd:bd%jed) :: S_E
+    real, dimension(bd%isd:bd%is, bd%jsd:bd%jed) :: S_W
 
     isd = bd%isd
     ied = bd%ied
     jsd = bd%jsd
     jed = bd%jed
 
-    !--- update domains
-   ! if (istag == 1 .and. jstag == 1) then
-   !   call mpp_update_domains(var, domain, complete=.true., position=NORTH + EAST)
-   ! end if
-   ! if (istag == 0 .and. jstag == 1) then
-   !   call mpp_update_domains(var, domain, complete=.true., position=NORTH)
-   ! end if
-   ! if (istag == 1 .and. jstag == 0) then
-   !   call mpp_update_domains(var, domain, complete=.true., position=EAST)
-   ! end if
     if (istag == 0 .and. jstag == 0) then
       call mpp_update_domains(var, domain, complete=.true.)
     else
       call mpp_error(FATAL, 'ext_scalar_2d for istag and jstag /=0 not implemented')
     end if
 
-    allocate (k2e_coef_u(dg%k2e_nord, isd:ied, jsd:jed))
-    allocate (k2e_loc_u(isd:ied, jsd:jed))
     do i = isd, ied
     do j = jsd, jed
       k2e_loc_u(i, j) = dg%k2e_loc(i, j)
       k2e_coef_u(:, i, j) = dg%k2e_coef(:, i, j)
     end do
     end do
-    call cube_rmp(var, dg, bd, domain, istag, jstag, k2e_loc_u, k2e_coef_u)
-    call fill_corners_domain_decomp(var, dg, bd, domain, istag, jstag)
-    call fill_corner_region(var, bd, dg, istag, jstag)
 
-    deallocate (k2e_coef_u)
-    deallocate (k2e_loc_u)
+    call create_buff_2d(var, dg, bd, S_N, S_E, S_S, S_W, istag, jstag)
+    call cube_rmp_buff(S_N(:, :), S_E(:, :), S_S(:, :), S_W(:, :), dg, bd, domain, istag, jstag, k2e_loc_u, k2e_coef_u)
+    call fill_corner_buffer(S_N(:, :), S_E(:, :), S_S(:, :), S_W(:, :), bd, dg, istag, jstag)
+    call fill_buff_corners_domain_decomp(S_N, S_E, S_S, S_W, dg, bd, domain, istag, jstag)
+    call apply_buff_2d(var, dg, bd, S_N, S_E, S_S, S_W, istag, jstag)
+
   end subroutine ext_scalar_2d
   !===========================================================================
   !> @brief update scalar block halo and remap to ext grid when needed
@@ -507,10 +519,17 @@ contains
     type(domain2d), intent(INOUT)         :: domain
     type(fv_grid_bounds_type), intent(IN) :: bd
     integer, intent(IN) :: istag, jstag
-    real, dimension(:, :, :) :: var
+    real, dimension(bd%isd:, bd%jsd:, :) :: var
+    real, dimension(:, :, :), allocatable :: S_N, S_S, S_E, S_W ! scalar buffers
+    real, dimension(:, :, :), allocatable :: varp1
     !--- local
     integer :: i, j, isd, ied, jsd, jed, k, npz
     integer :: dims(3)
+
+    !real, dimension(bd%isd:bd%ied + istag, bd%je + jstag:bd%jed + jstag, dg%npz) :: S_N
+    !real, dimension(bd%isd:bd%ied + istag, bd%jsd:bd%js, dg%npz) :: S_S
+    !real, dimension(bd%ie + istag:bd%ied + istag, bd%jsd:bd%jed + jstag, dg%npz) :: S_E
+    !real, dimension(bd%isd:bd%is, bd%jsd:bd%jed + jstag, dg%npz) :: S_W
 
     integer, dimension(:, :), allocatable :: k2e_loc_u
     real(kind=R_GRID), dimension(:, :, :), allocatable :: k2e_coef_u
@@ -524,13 +543,11 @@ contains
       call mpp_error(FATAL, 'ext_scalar_3d for stag fields not implemented')
     end if
 
+      call timing_on('ext_scalar3d')
     !--- update domains
     if (istag == 1 .and. jstag == 1) then
       allocate (k2e_coef_u(dg%k2e_nord, isd:ied + 1, jsd:jed + 1))
       allocate (k2e_loc_u(isd:ied + 1, jsd:jed + 1))
-!      k2e_loc_u = dg%k2e_loc_b
-!      k2e_coef_u = dg%k2e_coef_b
-
       do i = isd, ied + 1
       do j = jsd, jed + 1
         k2e_loc_u(i, j) = dg%k2e_loc_b(i, j)
@@ -549,23 +566,56 @@ contains
         k2e_coef_u(:, i, j) = dg%k2e_coef(:, i, j)
       end do
       end do
-      !k2e_loc_u = dg%k2e_loc
-      !k2e_coef_u = dg%k2e_coef
       call mpp_update_domains(var, domain, complete=.true.)
     end if
 
     !--- remap to ext
     dims = shape(var)
-    npz = dims(3)
+    npz = dims(3) !!!! SOME FIELDS ARE NPZ+1
 
-    do k = 1, npz
-      call cube_rmp(var(:, :, k), dg, bd, domain, istag, jstag, k2e_loc_u, k2e_coef_u)
-    end do
-    call fill_corners_domain_decomp(var, dg, bd, domain, istag, jstag)
-    call fill_corner_region(var, bd, dg, istag, jstag)
+    allocate (S_N(bd%isd:bd%ied + istag, bd%je + jstag:bd%jed + jstag, npz))
+    allocate (S_S(bd%isd:bd%ied + istag, bd%jsd:bd%js, npz))
+    allocate (S_E(bd%ie + istag:bd%ied + istag, bd%jsd:bd%jed + jstag, npz))
+    allocate (S_W(bd%isd:bd%is, bd%jsd:bd%jed + jstag, npz))
+
+    if (istag == 0 .and. jstag == 0) then
+      call create_buff(var, dg, bd, S_N, S_E, S_S, S_W, istag, jstag)
+
+      call timing_on('cube_buffrmp&cornerbuff')
+      !$OMP parallel do default(none) shared(npz,S_N,S_E,S_S,S_W,dg,bd,domain,istag,jstag,k2e_loc_u,k2e_coef_u)
+      do k = 1, npz
+     call cube_rmp_buff(S_N(:, :, k), S_E(:, :, k), S_S(:, :, k), S_W(:, :, k), dg, bd, domain, istag, jstag, k2e_loc_u, k2e_coef_u)
+        call fill_corner_buffer(S_N(:, :, k), S_E(:, :, k), S_S(:, :, k), S_W(:, :, k), bd, dg, istag, jstag)
+      end do
+      call timing_off('cube_buffrmp&cornerbuff')
+      call timing_on('fillcornerdomaindecomp')
+      call fill_buff_corners_domain_decomp(S_N, S_E, S_S, S_W, dg, bd, domain, istag, jstag)
+      call timing_off('fillcornerdomaindecomp')
+      call apply_buff(var, dg, bd, S_N, S_E, S_S, S_W, istag, jstag)
+    end if
+
+    if (istag == 1 .and. jstag == 1) then
+      call create_buff(var, dg, bd, S_N, S_E, S_S, S_W, istag, jstag)
+      ! FLIP order TO EXTRAPOLATE or INTERPOLATE DIVERGENCE AT CORNERS (also check the compute lagrange coeff xp3)
+      ! compute_lagrange_coeff_extra: with cube_rmp then fill_corner => extrapolate div from remaped data
+      ! compute_lagrange_coeff: with fill_corner then cube_rmp=> interpolate div from kinked data
+      call timing_on('cube_buffrmp&cornerbuff')
+      !$OMP parallel do default(none) shared(npz,S_N,S_E,S_S,S_W,dg,bd,domain,istag,jstag,k2e_loc_u,k2e_coef_u)
+      do k = 1, npz
+     call cube_rmp_buff(S_N(:, :, k), S_E(:, :, k), S_S(:, :, k), S_W(:, :, k), dg, bd, domain, istag, jstag, k2e_loc_u, k2e_coef_u)
+        call fill_corner_buffer(S_N(:, :, k), S_E(:, :, k), S_S(:, :, k), S_W(:, :, k), bd, dg, istag, jstag)
+      end do
+      call timing_off('cube_buffrmp&cornerbuff')
+      call timing_on('fillcornerdomaindecomp')
+      call fill_buff_corners_domain_decomp(S_N, S_E, S_S, S_W, dg, bd, domain, istag, jstag)
+      call timing_off('fillcornerdomaindecomp')
+      call apply_buff(var, dg, bd, S_N, S_E, S_S, S_W, istag, jstag)
+    end if
 
     deallocate (k2e_coef_u)
     deallocate (k2e_loc_u)
+    deallocate (S_N, S_E, S_S, S_W)
+      call timing_off('ext_scalar3d')
   end subroutine ext_scalar_3d
   !===========================================================================
   !> @brief update scalar block halo and remap to ext grid when needed
@@ -575,6 +625,7 @@ contains
     type(fv_grid_bounds_type), intent(IN) :: bd
     integer, intent(IN) :: istag, jstag
     real, dimension(:, :, :, :) :: var
+    real, dimension(:, :, :, :), allocatable :: S_N, S_S, S_E, S_W ! scalar buffers
     !--- local
     integer :: k, n, npz, nq
     integer :: i, j, isd, ied, jsd, jed
@@ -587,6 +638,7 @@ contains
     jsd = bd%jsd
     jed = bd%jed
 
+      call timing_on('ext_scalar4d')
     !--- update domains
     if (istag == 0 .and. jstag == 0) then
       allocate (k2e_coef_u(dg%k2e_nord, isd:ied, jsd:jed))
@@ -608,18 +660,31 @@ contains
     npz = dims(3)
     nq = dims(4)
 
+    allocate (S_N(bd%isd:bd%ied + istag, bd%je + jstag:bd%jed + jstag, npz, nq))
+    allocate (S_S(bd%isd:bd%ied + istag, bd%jsd:bd%js, npz, nq))
+    allocate (S_E(bd%ie + istag:bd%ied + istag, bd%jsd:bd%jed + jstag, npz, nq))
+    allocate (S_W(bd%isd:bd%is, bd%jsd:bd%jed + jstag, npz, nq))
+
     do n = 1, nq
+    call create_buff(var(:, :, :, nq), dg, bd, S_N(:, :, :, nq), S_E(:, :, :, nq), S_S(:, :, :, nq), S_W(:, :, :, nq), istag, jstag)
+    end do !nq
+
+    do n = 1, nq
+!$OMP parallel do default(none) shared(npz,nq,S_N,S_E,S_S,S_W,dg,bd,domain,istag,jstag,k2e_loc_u,k2e_coef_u)
       do k = 1, npz
-        call cube_rmp(var(:, :, k, n), dg, bd, domain, istag, jstag, k2e_loc_u, k2e_coef_u)
+       call cube_rmp_buff(S_N(:, :, k,nq), S_E(:, :, k,nq), S_S(:, :, k,nq), S_W(:, :, k,nq), dg, bd, domain, istag, jstag, k2e_loc_u, k2e_coef_u)
+        call fill_corner_buffer(S_N(:, :, k, nq), S_E(:, :, k, nq), S_S(:, :, k, nq), S_W(:, :, k, nq), bd, dg, istag, jstag)
       end do
-      call fill_corners_domain_decomp(var(:, :, :, n), dg, bd, domain, istag, jstag)
-    end do
-    call fill_corner_region(var, bd, dg, istag, jstag)
+      call fill_buff_corners_domain_decomp(S_N(:,:,:,nq), S_E(:,:,:,nq), S_S(:,:,:,nq), S_W(:,:,:,nq), dg, bd, domain, istag, jstag)
+     call apply_buff(var(:, :, :, nq), dg, bd, S_N(:, :, :, nq), S_E(:, :, :, nq), S_S(:, :, :, nq), S_W(:, :, :, nq), istag, jstag)
+    end do !nq
 
     if (istag == 0 .and. jstag == 0) then
       deallocate (k2e_coef_u)
       deallocate (k2e_loc_u)
+      deallocate (S_E, S_N, S_W, S_S)
     end if
+      call timing_off('ext_scalar4d')
   end subroutine ext_scalar_4d
   !===========================================================================
   !> @brief update vector block halo and remap to ext grid when needed
@@ -633,19 +698,35 @@ contains
     real, dimension(bd%isd:bd%ied + ieu_stag, bd%jsd:bd%jed + jeu_stag, flagstruct%npz) :: u_in
     real, dimension(bd%isd:bd%ied + iev_stag, bd%jsd:bd%jed + jev_stag, flagstruct%npz) :: v_in
     !--- local
-    real, dimension(bd%isd:bd%ied + ieu_stag, bd%jsd:bd%jed + jeu_stag, flagstruct%npz) :: u
-    real, dimension(bd%isd:bd%ied + iev_stag, bd%jsd:bd%jed + jev_stag, flagstruct%npz) :: v
-    real, dimension(bd%isd - 1:bd%ied + 1 + ieu_stag, bd%jsd - 1:bd%jed + 1 + jeu_stag, flagstruct%npz) :: up1
-    real, dimension(bd%isd - 1:bd%ied + 1 + iev_stag, bd%jsd - 1:bd%jed + 1 + jev_stag, flagstruct%npz) :: vp1
-    integer :: is, ie, js, je, isd, ied, jsd, jed, isdp1, iedp1, jsdp1, jedp1, ng, npz
-    integer :: i, j, k
-    real, dimension(:, :, :), allocatable :: ull, vll, ullp1, vllp1
+    integer :: is, ie, js, je, isd, ied, jsd, jed, ng, npz
+    integer :: i, j, k, k2e_nord
 
-    real, dimension(:, :, :, :), allocatable :: c2l, l2c
-    integer, dimension(:, :), allocatable :: k2e_loc_u
-    real(kind=R_GRID), dimension(:, :, :), allocatable :: k2e_coef_u
-    integer, dimension(:, :), allocatable :: k2e_loc_v
-    real(kind=R_GRID), dimension(:, :, :), allocatable :: k2e_coef_v
+    real, dimension(bd%isd:bd%ied, bd%jsd:bd%jed, flagstruct%npz) :: ull, vll
+    real, dimension(bd%isd - 1:bd%ied + 1, bd%jsd - 1:bd%jed + 1, flagstruct%npz) :: ullp1, vllp1
+! for Agrid 3 haloes
+    real, dimension(bd%isd:bd%ied, bd%je:bd%jed, flagstruct%npz) :: u_N
+    real, dimension(bd%isd:bd%ied, bd%jsd:bd%js, flagstruct%npz) :: u_S
+    real, dimension(bd%ie:bd%ied, bd%jsd:bd%jed, flagstruct%npz) :: u_E
+    real, dimension(bd%isd:bd%is, bd%jsd:bd%jed, flagstruct%npz) :: u_W
+    real, dimension(bd%isd:bd%ied, bd%je:bd%jed, flagstruct%npz) :: v_N
+    real, dimension(bd%isd:bd%ied, bd%jsd:bd%js, flagstruct%npz) :: v_S
+    real, dimension(bd%ie:bd%ied, bd%jsd:bd%jed, flagstruct%npz) :: v_E
+    real, dimension(bd%isd:bd%is, bd%jsd:bd%jed, flagstruct%npz) :: v_W
+
+! for CDgrid 4 haloes
+    real, dimension(dg%bd%isd:dg%bd%ied, dg%bd%je:dg%bd%jed, flagstruct%npz) :: u_N1
+    real, dimension(dg%bd%isd:dg%bd%ied, dg%bd%jsd:dg%bd%js, flagstruct%npz) :: u_S1
+    real, dimension(dg%bd%ie:dg%bd%ied, dg%bd%jsd:dg%bd%jed, flagstruct%npz) :: u_E1
+    real, dimension(dg%bd%isd:dg%bd%is, dg%bd%jsd:dg%bd%jed, flagstruct%npz) :: u_W1
+    real, dimension(dg%bd%isd:dg%bd%ied, dg%bd%je:dg%bd%jed, flagstruct%npz) :: v_N1
+    real, dimension(dg%bd%isd:dg%bd%ied, dg%bd%jsd:dg%bd%js, flagstruct%npz) :: v_S1
+    real, dimension(dg%bd%ie:dg%bd%ied, dg%bd%jsd:dg%bd%jed, flagstruct%npz) :: v_E1
+    real, dimension(dg%bd%isd:dg%bd%is, dg%bd%jsd:dg%bd%jed, flagstruct%npz) :: v_W1
+
+    real(kind=R_GRID), dimension(2, 2, bd%isd:bd%ied, bd%jsd:bd%jed) :: c2l, l2c
+
+    integer, dimension(bd%isd - 1:bd%ied + 1, bd%jsd - 1:bd%jed + 1) :: k2e_loc_u, k2e_loc_v
+    real(kind=R_GRID), dimension(dg%k2e_nord, bd%isd - 1:bd%ied + 1, bd%jsd - 1:bd%jed + 1) :: k2e_coef_u, k2e_coef_v
 
     !--- assign parameters
     is = bd%is
@@ -656,341 +737,203 @@ contains
     ied = bd%ied
     jsd = bd%jsd
     jed = bd%jed
-    isdp1 = bd%isd - 1
-    iedp1 = bd%ied + 1
-    jsdp1 = bd%jsd - 1
-    jedp1 = bd%jed + 1
     ng = bd%ng
 
     npz = flagstruct%npz
 
-    allocate (ull(isd:ied, jsd:jed, npz))
-    allocate (vll(isd:ied, jsd:jed, npz))
-    allocate (ullp1(isd - 1:ied + 1, jsd - 1:jed + 1, npz))
-    allocate (vllp1(isd - 1:ied + 1, jsd - 1:jed + 1, npz))
+    k2e_nord = dg%k2e_nord
+
     ull = -99999.
     vll = -99999.
-    allocate (c2l(2, 2, isd:ied + iev_stag, jsd:jed + jev_stag))
-    allocate (l2c(2, 2, isd:ied + iev_stag, jsd:jed + jev_stag))
+    ullp1 = -99999.
+    vllp1 = -99999.
+
     c2l = -99999.
     l2c = -99999.
+
+    u_N = -99899.
+    v_N = -99899.
+    u_S = -99899.
+    v_S = -99899.
+    u_E = -99899.
+    v_E = -99899.
+    u_W = -99899.
+    v_W = -99899.
+
+!necessary
+    u_N1 = -99899.
+    v_N1 = -99899.
+    u_S1 = -99899.
+    v_S1 = -99899.
+    u_E1 = -99899.
+    v_E1 = -99899.
+    u_W1 = -99899.
+    v_W1 = -99899.
 
     ! Since we are transforming C/D variables to A using c2l, we only use the A-grid
     ! remapping coeff. C/D extensions coeff are available, using them however with the current
     ! logic produced more noised compared to the first method.
     ! To CHECK:  do C/D on the fly without passing by A.
 
-!Agrid
-    if ((ieu_stag == 0 .and. jeu_stag == 0 .and. iev_stag == 0 .and. jev_stag == 0)) then  !AGRID CGRID
-      allocate (k2e_coef_u(dg%k2e_nord, isd:ied, jsd:jed))
-      allocate (k2e_loc_u(isd:ied, jsd:jed))
-      allocate (k2e_coef_v(dg%k2e_nord, isd:ied, jsd:jed))
-      allocate (k2e_loc_v(isd:ied, jsd:jed))
-      k2e_loc_u = -99999
-      k2e_coef_u = -99999
-      k2e_loc_v = -99999
-      k2e_coef_v = -99999
+    call timing_on('extvector')
+
+    do j = jsd - 1, jed + 1
+    do i = isd - 1, ied + 1
+      k2e_loc_u(i, j) = dg%k2e_loc(i, j)
+      k2e_coef_u(:, i, j) = dg%k2e_coef(:, i, j)
+      k2e_loc_v(i, j) = dg%k2e_loc(i, j)
+      k2e_coef_v(:, i, j) = dg%k2e_coef(:, i, j)
+    end do
+    end do
+
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    ! Transform cubed to latlon winds
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    if (ieu_stag == 0 .and. jeu_stag == 0 .and. iev_stag == 0 .and. jev_stag == 0) then  !AGRID
       do j = jsd, jed
       do i = isd, ied
         c2l(:, :, i, j) = dg%a_c2l(:, :, i, j)
         l2c(:, :, i, j) = dg%a_l2c(:, :, i, j)
-        k2e_loc_u(i, j) = dg%k2e_loc(i, j)
-        k2e_coef_u(:, i, j) = dg%k2e_coef(:, i, j)
-        k2e_loc_v(i, j) = dg%k2e_loc(i, j)
-        k2e_coef_v(:, i, j) = dg%k2e_coef(:, i, j)
       end do
       end do
-
-    else
-
-      allocate (k2e_coef_u(dg%k2e_nord, isd - 1:ied + 1, jsd - 1:jed + 1))
-      allocate (k2e_loc_u(isd - 1:ied + 1, jsd - 1:jed + 1))
-      allocate (k2e_coef_v(dg%k2e_nord, isd - 1:ied + 1, jsd - 1:jed + 1))
-      allocate (k2e_loc_v(isd - 1:ied + 1, jsd - 1:jed + 1))
-      k2e_loc_u = -99999
-      k2e_coef_u = -99999
-      k2e_loc_v = -99999
-      k2e_coef_v = -99999
-      do j = jsd - 1, jed + 1
-      do i = isd - 1, ied + 1
-        !c2l (:,:,i,j) = dg%a_c2l(:,:,i,j)
-        !l2c(:,:,i,j) = dg%a_l2c(:,:,i,j)
-        k2e_loc_u(i, j) = dg%k2e_loc(i, j)
-        k2e_coef_u(:, i, j) = dg%k2e_coef(:, i, j)
-        k2e_loc_v(i, j) = dg%k2e_loc(i, j)
-        k2e_coef_v(:, i, j) = dg%k2e_coef(:, i, j)
-      end do
-      end do
-
-    end if
-    if (ieu_stag == 0 .and. jeu_stag == 0 .and. iev_stag == 0 .and. jev_stag == 0) then  !AGRID
-      do k = 1, npz
-        do j = js, je
-          do i = is, ie
-            ull(i, j, k) = c2l(1, 1, i, j)*u_in(i, j, k) + c2l(1, 2, i, j)*v_in(i, j, k)
-          end do
-        end do
-        do j = js, je
-          do i = is, ie
-            vll(i, j, k) = c2l(2, 1, i, j)*u_in(i, j, k) + c2l(2, 2, i, j)*v_in(i, j, k)
-          end do
-        end do
-      end do
+      call mpp_update_domains(u_in, v_in, domain, gridtype=AGRID) ! update interior pe first
+      call c2l_agrid(u_in, v_in, ull, vll, npz, bd, c2l) !zonal-merdional vel
     end if
 
     if (ieu_stag == 0 .and. jeu_stag == 1 .and. iev_stag == 1 .and. jev_stag == 0) then  !DGRID
       call mpp_update_domains(u_in, v_in, domain, gridtype=DGRID_NE) ! update interior pe first
-      !call c2l_ord2(u_in, v_in, ull, vll, gridstruct, npz, 0, bd, .false.) !zonal-merdional vel
       call c2l_ord2(u_in, v_in, ull, vll, gridstruct, npz, 0, bd, .true.) !zonal-merdional vel
-
-      do k = 1, npz
-        do j = js, je + 1
-          do i = is, ie + 1
-            ullp1(i, j, k) = ull(i, j, k)
-          end do
-        end do
-        do j = js, je + 1
-          do i = is, ie + 1
-            vllp1(i, j, k) = vll(i, j, k)
-          end do
-        end do
-      end do
-
     end if
 
     if (ieu_stag == 1 .and. jeu_stag == 0 .and. iev_stag == 0 .and. jev_stag == 1) then  !CGRID
       call mpp_update_domains(u_in, v_in, domain, gridtype=CGRID_NE) !update interior pe first
       call c2l_ord2_cgrid(u_in, v_in, ull, vll, gridstruct, npz, 0, bd, .true.) !zonal-merdional vel
+    end if
+
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!
+    !Update latlonwinds haloes
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!
+    if ((ieu_stag == 0 .and. jeu_stag == 0 .and. iev_stag == 0 .and. jev_stag == 0)) then  ! AGRID
+      call mpp_update_domains(ull, domain, complete=.false.)
+      call mpp_update_domains(vll, domain, complete=.true.)
+      call create_buff(ull, dg, bd, u_N, u_E, u_S, u_W, 0, 0)
+      call create_buff(vll, dg, bd, v_N, v_E, v_S, v_W, 0, 0)
+    else !CDGRID
+      !$OMP parallel do default(none) shared(npz,is,ie,js,je,ull,vll,ullp1,vllp1)
       do k = 1, npz
         do j = js, je + 1
           do i = is, ie + 1
             ullp1(i, j, k) = ull(i, j, k)
-          end do
-        end do
-        do j = js, je + 1
-          do i = is, ie + 1
             vllp1(i, j, k) = vll(i, j, k)
           end do
         end do
       end do
-
-    end if  !C-grid
-
-    !Update latlonwinds haloes
-      !!!!!!!!!!!!!!!!!!!!!!!!!!!
-    if ((ieu_stag == 0 .and. jeu_stag == 0 .and. iev_stag == 0 .and. jev_stag == 0)) then  ! AGRID
-      call mpp_update_domains(ull, domain, complete=.false.)
-      call mpp_update_domains(vll, domain, complete=.true.)
-    else !CDGRID
       call mpp_update_domains(ullp1, dg%domain_for_duo, complete=.false.)
       call mpp_update_domains(vllp1, dg%domain_for_duo, complete=.true.)
+      call create_buff(ullp1, dg, dg%bd, u_N1, u_E1, u_S1, u_W1, 0, 0)
+      call create_buff(vllp1, dg, dg%bd, v_N1, v_E1, v_S1, v_W1, 0, 0)
     end if
 
+    !!!!!!!!!!!!!!!!!!
     !--- remap to ext
-      !!!!!!!!!!!!!!!!!!
+    !!!!!!!!!!!!!!!!!!
     if ((ieu_stag == 0 .and. jeu_stag == 0 .and. iev_stag == 0 .and. jev_stag == 0)) then   !AGRID
+
+      call timing_on('cube_buffrmp&cornerbuff')
+
+      !$OMP parallel do default(none) shared(npz,dg,bd,domain, u_N,u_E,u_S,u_W,k2e_loc_u,k2e_coef_u, v_N,v_E,v_S,v_W,k2e_loc_v,k2e_coef_v, isd, ied, jsd, jed, k2e_nord)
       do k = 1, npz
-        call cube_rmp(ull(:, :, k), dg, bd, domain, 0, 0, k2e_loc_u, k2e_coef_u)
-        call cube_rmp(vll(:, :, k), dg, bd, domain, 0, 0, k2e_loc_v, k2e_coef_v)
+        call cube_rmp_buff(u_N(:, :, k), u_E(:, :, k), u_S(:, :, k), u_W(:, :, k), dg, bd, domain, 0, 0, k2e_loc_u (isd:ied, jsd:jed), k2e_coef_u(1:k2e_nord, isd:ied, jsd:jed) )
+        call cube_rmp_buff(v_N(:, :, k), v_E(:, :, k), v_S(:, :, k), v_W(:, :, k), dg, bd, domain, 0, 0, k2e_loc_v (isd:ied, jsd:jed), k2e_coef_v(1:k2e_nord, isd:ied, jsd:jed) )
+        call fill_corner_buffer(u_N(:, :, k), u_E(:, :, k), u_S(:, :, k), u_W(:, :, k), bd, dg, 0, 0)
+        call fill_corner_buffer(v_N(:, :, k), v_E(:, :, k), v_S(:, :, k), v_W(:, :, k), bd, dg, 0, 0)
       end do
-      call fill_corners_domain_decomp(ull, dg, bd, domain, 0, 0)
-      call fill_corners_domain_decomp(vll, dg, bd, domain, 0, 0)
+
+      call timing_off('cube_buffrmp&cornerbuff')
+
+      call timing_on('fillcornerdomaindecomp')
+      call fill_buff_corners_domain_decomp(u_N, u_E, u_S, u_W, dg, bd, domain, 0, 0)
+      call fill_buff_corners_domain_decomp(v_N, v_E, v_S, v_W, dg, bd, domain, 0, 0)
+      call timing_off('fillcornerdomaindecomp')
+
+      call timing_on('l2c_halo_buff')
+      call l2c_halo_buff_only(npz, u_N, v_N, bd, bd%isd, bd%ied, bd%je, bd%jed, l2c)
+      call l2c_halo_buff_only(npz, u_W, v_W, bd, bd%isd, bd%is, bd%jsd, bd%jed, l2c)
+      call l2c_halo_buff_only(npz, u_S, v_S, bd, bd%isd, bd%ied, bd%jsd, bd%js, l2c)
+      call l2c_halo_buff_only(npz, u_E, v_E, bd, bd%ie, bd%ied, bd%jsd, bd%jed, l2c)
+      call timing_off('l2c_halo_buff')
+
+      call apply_buff(u_in, dg, bd, u_N, u_E, u_S, u_W, 0, 0)
+      call apply_buff(v_in, dg, bd, v_N, v_E, v_S, v_W, 0, 0)
 
     else !CDGRID
 
+      call timing_on('cube_buffrmp&cornerbuff')
+      !$OMP parallel do default(none) shared(npz,u_N1,u_E1,u_S1,u_W1,dg,k2e_loc_u,k2e_coef_u, v_N1,v_E1,v_S1,v_W1,k2e_loc_v,k2e_coef_v)
       do k = 1, npz
-        call cube_rmp(ullp1(:, :, k), dg, dg%bd, dg%domain_for_duo, 0, 0, k2e_loc_u, k2e_coef_u)
-        call cube_rmp(vllp1(:, :, k), dg, dg%bd, dg%domain_for_duo, 0, 0, k2e_loc_v, k2e_coef_v)
+        call cube_rmp_buff(u_N1(:, :, k), u_E1(:, :, k), u_S1(:, :, k), u_W1(:, :, k), \
+        dg, dg%bd, dg%domain_for_duo, 0, 0, k2e_loc_u, k2e_coef_u)
+        call cube_rmp_buff(v_N1(:, :, k), v_E1(:, :, k), v_S1(:, :, k), v_W1(:, :, k), \
+        dg, dg%bd, dg%domain_for_duo, 0, 0, k2e_loc_v, k2e_coef_v)
+        call fill_corner_buffer(u_N1(:, :, k), u_E1(:, :, k), u_S1(:, :, k), u_W1(:, :, k), dg%bd, dg, 0, 0)
+        call fill_corner_buffer(v_N1(:, :, k), v_E1(:, :, k), v_S1(:, :, k), v_W1(:, :, k), dg%bd, dg, 0, 0)
       end do
-      call fill_corners_domain_decomp(ullp1, dg, dg%bd, dg%domain_for_duo, 0, 0)
-      call fill_corners_domain_decomp(vllp1, dg, dg%bd, dg%domain_for_duo, 0, 0)
+
+      call timing_off('cube_buffrmp&cornerbuff')
+
+      call timing_on('fillcornerdomaindecomp')
+      call fill_buff_corners_domain_decomp(u_N1, u_E1, u_S1, u_W1, dg, dg%bd, dg%domain_for_duo, 0, 0)
+      call fill_buff_corners_domain_decomp(v_N1, v_E1, v_S1, v_W1, dg, dg%bd, dg%domain_for_duo, 0, 0)
+      call timing_off('fillcornerdomaindecomp')
 
       if (ieu_stag == 1 .and. jeu_stag == 0 .and. iev_stag == 0 .and. jev_stag == 1) then  !CGRID
-        call cubed_a2c_halo(npz, ullp1, vllp1, up1, vp1, dg)
-      else
-        call cubed_a2d_halo(npz, ullp1, vllp1, up1, vp1, dg)
+      call timing_on('cubed_a2c_halo_buff')
+        call cubed_a2c_halo_buff_only(npz, u_N1, v_N1, bd, dg, dg%bd%isd, dg%bd%ied, dg%bd%je, dg%bd%jed)
+        call cubed_a2c_halo_buff_only(npz, u_W1, v_W1, bd, dg, dg%bd%isd, dg%bd%is, dg%bd%jsd, dg%bd%jed)
+        call cubed_a2c_halo_buff_only(npz, u_S1, v_S1, bd, dg, dg%bd%isd, dg%bd%ied, dg%bd%jsd, dg%bd%js)
+        call cubed_a2c_halo_buff_only(npz, u_E1, v_E1, bd, dg, dg%bd%ie, dg%bd%ied, dg%bd%jsd, dg%bd%jed)
+      call timing_off('cubed_a2c_halo_buff')
+      else !DGRID
+      call timing_on('cubed_a2d_halo_buff')
+        call cubed_a2d_halo_buff_only(npz, u_N1, v_N1, bd, dg, dg%bd%isd, dg%bd%ied, dg%bd%je, dg%bd%jed)
+        call cubed_a2d_halo_buff_only(npz, u_W1, v_W1, bd, dg, dg%bd%isd, dg%bd%is, dg%bd%jsd, dg%bd%jed)
+        call cubed_a2d_halo_buff_only(npz, u_S1, v_S1, bd, dg, dg%bd%isd, dg%bd%ied, dg%bd%jsd, dg%bd%js)
+        call cubed_a2d_halo_buff_only(npz, u_E1, v_E1, bd, dg, dg%bd%ie, dg%bd%ied, dg%bd%jsd, dg%bd%jed)
+      call timing_off('cubed_a2d_halo_buff')
       end if
-
-      do k = 1, npz
-      do j = jsd, jed + jeu_stag
-      do i = isd, ied + ieu_stag
-        u(i, j, k) = up1(i, j, k)
-      end do
-      end do
-      do j = jsd, jed + jev_stag
-      do i = isd, ied + iev_stag
-        v(i, j, k) = vp1(i, j, k)
-      end do
-      end do
-      end do
+      call apply_buff_stag(u_in, dg, bd, u_N1, u_E1, u_S1, u_W1, ieu_stag, jeu_stag)
+      call apply_buff_stag(v_in, dg, bd, v_N1, v_E1, v_S1, v_W1, iev_stag, jev_Stag)
     end if
 
-    if (ieu_stag == 0 .and. jeu_stag == 0 .and. iev_stag == 0 .and. jev_stag == 0) then  !AGRID
-      !--- convert to wind
-      ! need to update the interior pes as well, so no switch
-      ! south
-      do k = 1, npz
-        do j = jsd, js - 1
-          do i = isd, ied
-            u_in(i, j, k) = l2c(1, 1, i, j)*ull(i, j, k) + l2c(1, 2, i, j)*vll(i, j, k)
-          end do
-        end do
-        do j = jsd, js - 1
-          do i = isd, ied
-            v_in(i, j, k) = l2c(2, 1, i, j)*ull(i, j, k) + l2c(2, 2, i, j)*vll(i, j, k)
-          end do
-        end do
-      end do
-
-      ! north
-      do k = 1, npz
-        do j = je + 1, jed
-          do i = isd, ied
-            u_in(i, j, k) = l2c(1, 1, i, j)*ull(i, j, k) + l2c(1, 2, i, j)*vll(i, j, k)
-          end do
-        end do
-        do j = je + 1, jed
-          do i = isd, ied
-            v_in(i, j, k) = l2c(2, 1, i, j)*ull(i, j, k) + l2c(2, 2, i, j)*vll(i, j, k)
-          end do
-        end do
-      end do
-
-      ! west
-      do k = 1, npz
-        do j = js, je
-          do i = isd, is - 1
-            u_in(i, j, k) = l2c(1, 1, i, j)*ull(i, j, k) + l2c(1, 2, i, j)*vll(i, j, k)
-          end do
-        end do
-        do j = js, je
-          do i = isd, is - 1
-            v_in(i, j, k) = l2c(2, 1, i, j)*ull(i, j, k) + l2c(2, 2, i, j)*vll(i, j, k)
-          end do
-        end do
-      end do
-
-      ! east
-      do k = 1, npz
-        do j = js, je
-          do i = ie + 1, ied
-            u_in(i, j, k) = l2c(1, 1, i, j)*ull(i, j, k) + l2c(1, 2, i, j)*vll(i, j, k)
-          end do
-        end do
-        do j = js, je
-          !do i = ie+ieu_stag+1,ied+iev_stag
-          do i = ie + 1, ied
-            v_in(i, j, k) = l2c(2, 1, i, j)*ull(i, j, k) + l2c(2, 2, i, j)*vll(i, j, k)
-          end do
-        end do
-      end do
-
-    else ! CD
-
-      if (dg%rmp_s) then
-        ! south
-        do k = 1, npz
-          do j = jsd, js - 1
-            do i = isd, ied + ieu_stag
-              u_in(i, j, k) = u(i, j, k)
-            end do
-          end do
-          do j = jsd, js - 1
-            do i = isd, ied + iev_stag
-              v_in(i, j, k) = v(i, j, k)
-            end do
-          end do
-        end do
-      end if
-
-      if (dg%rmp_n) then
-        ! north
-        do k = 1, npz
-          do j = je + jeu_stag + 1, jed + jeu_stag
-            do i = isd, ied + ieu_stag
-              u_in(i, j, k) = u(i, j, k)
-            end do
-          end do
-          !do j = je+jeu_stag+1,jed+jev_stag
-          do j = je + jev_stag + 1, jed + jev_stag
-            do i = isd, ied + iev_stag
-              v_in(i, j, k) = v(i, j, k)
-            end do
-          end do
-        end do
-      end if
-
-      if (dg%rmp_w) then
-        ! west
-        do k = 1, npz
-          do j = jsd, jed + jeu_stag
-            do i = isd, is - 1
-              u_in(i, j, k) = u(i, j, k)
-            end do
-          end do
-          do j = jsd, jed + jev_stag
-            do i = isd, is - 1
-              v_in(i, j, k) = v(i, j, k)
-            end do
-          end do
-        end do
-      end if
-
-      if (dg%rmp_e) then
-        ! east
-        do k = 1, npz
-          do j = jsd, jed + jeu_stag
-            do i = ie + ieu_stag + 1, ied + ieu_stag
-              u_in(i, j, k) = u(i, j, k)
-            end do
-          end do
-          do j = jsd, jed + jev_stag
-            !do i = ie+ieu_stag+1,ied+iev_stag
-            do i = ie + iev_stag + 1, ied + iev_stag
-              v_in(i, j, k) = v(i, j, k)
-            end do
-          end do
-        end do
-      end if
-
-    end if !if C-grid
-
-!Fill corner region
-!!!!!!!!!!!!!!!!!!!
-    call fill_corner_region(u_in, bd, dg, ieu_stag, jeu_stag)
-    call fill_corner_region(v_in, bd, dg, iev_stag, jev_stag)
-
-    !--- deallocate wk arrays
-    deallocate (ull)
-    deallocate (vll)
-    deallocate (ullp1)
-    deallocate (vllp1)
-    deallocate (k2e_coef_u)
-    deallocate (k2e_coef_v)
-    deallocate (k2e_loc_u)
-    deallocate (k2e_loc_v)
-    deallocate (c2l)
-    deallocate (l2c)
-
+    call timing_off('extvector')
   end subroutine ext_vector
   !===========================================================================
-  subroutine cube_rmp(var, dg, bd, domain, istag, jstag, k2e_loc, k2e_coef)
+  !===========================================================================
+
+  subroutine cube_rmp_buff(N_buff, E_buff, S_buff, W_buff, dg, bd, domain, istag, jstag, k2e_loc, k2e_coef)
     type(duogrid_type), intent(in) :: dg
     type(fv_grid_bounds_type), intent(IN) :: bd
     type(domain2d), intent(INOUT) :: domain
     integer, intent(in) :: istag, jstag
-    !integer, intent(in) :: ext_x, ext_y
-    real, dimension(bd%isd:bd%ied + istag, bd%jsd:bd%jed + jstag) :: var
+    real, intent(inout), dimension(bd%isd:, bd%je + jstag:) :: N_buff
+    real, intent(inout), dimension(bd%isd:, bd%jsd:) :: S_buff
+    real, intent(inout), dimension(bd%ie + istag:, bd%jsd:) :: E_buff
+    real, intent(inout), dimension(bd%isd:, bd%jsd:) :: W_buff
     ! local
-    real, dimension(:, :), allocatable :: var_kik
+!    real, dimension( bd%isd:,         bd%je+jstag:,       1:) :: N_buff_local
+!    real, dimension( bd%isd:,         bd%jsd:,            1:) :: S_buff_local
+!    real, dimension( bd%ie+istag:,    bd%jsd:,             1:) :: E_buff_local
+!    real, dimension( bd%isd:,         bd%jsd:,            1:) :: W_buff_local
+
+    real, dimension(bd%isd:bd%ied + istag, bd%je + jstag:bd%jed + jstag) :: N_buff_local
+    real, dimension(bd%isd:bd%ied + istag, bd%jsd:bd%js) :: S_buff_local
+    real, dimension(bd%ie + istag:bd%ied + istag, bd%jsd:bd%jed + jstag) :: E_buff_local
+    real, dimension(bd%isd:bd%is, bd%jsd:bd%jed + jstag) :: W_buff_local
+
     logical :: rmp_w, rmp_e, rmp_s, rmp_n, rmp_sw, rmp_se, rmp_ne, rmp_nw
     integer :: is, ie, js, je, isd, ied, jsd, jed, ng
     integer :: i, j, ii, n
     integer :: loc, lo, offset, jmin, jmax
-    !   real, dimension(:,:), allocatable :: k2e_loc
-    !   real, dimension(:,:,:), allocatable :: k2e_coef
-    !  integer, dimension(bd%isd:bd%ied+ext_x, bd%jsd:bd%jed+ext_y) :: k2e_loc
-    !  real, dimension(dg%k2e_nord,bd%isd:bd%ied+ext_x, bd%jsd:bd%jed+ext_y) :: k2e_coef
     integer, dimension(bd%isd:bd%ied + istag, bd%jsd:bd%jed + jstag) :: k2e_loc
     real(kind=R_GRID), dimension(dg%k2e_nord, bd%isd:bd%ied + istag, bd%jsd:bd%jed + jstag) :: k2e_coef
 
@@ -1017,27 +960,25 @@ contains
 
     offset = dg%k2e_nord/2
 
-    !--- allocata wk array
-    allocate (var_kik(isd:ied + istag, jsd:jed + jstag))
-
-    !--- copy neighbor to var_kik
+    call timing_on('cube_buffrmp_routine')
     do ii = 1, ng
       do i = isd, ied + istag
         j = js - ii
-        var_kik(i, j) = var(i, j)
+        S_buff_local(i, j) = S_buff(i, j)
         j = je + jstag + ii
-        var_kik(i, j) = var(i, j)
+        N_buff_local(i, j) = N_buff(i, j)
       end do
-      do j = js, je + jstag
+      do j = jsd, jed + jstag
         i = is - ii
-        var_kik(i, j) = var(i, j)
+        W_buff_local(i, j) = W_buff(i, j)
         i = ie + istag + ii
-        var_kik(i, j) = var(i, j)
+        E_buff_local(i, j) = E_buff(i, j)
       end do
     end do
 
     !--- south
     if (rmp_s) then
+!      S_buff_local=S_buff
       do ii = 1, ng
 
         j = js - ii
@@ -1047,9 +988,10 @@ contains
           loc = k2e_loc(i, j)
           lo = loc - offset
 
-          var(i, j) = 0.
+          !var(i, j) = 0.
+          S_buff(i, j) = 0
           do n = 1, dg%k2e_nord
-            var(i, j) = var(i, j) + var_kik(lo + n, j)*k2e_coef(n, i, j)
+            S_buff(i, j) = S_buff(i, j) + S_buff_local(lo + n, j)*k2e_coef(n, i, j)
           end do
 
         end do
@@ -1059,6 +1001,7 @@ contains
 
     !--- north
     if (rmp_n) then
+!      N_buff_local=N_buff
       do ii = 1, ng
 
         j = je + jstag + ii
@@ -1068,9 +1011,10 @@ contains
           loc = k2e_loc(i, j)
           lo = loc - offset
 
-          var(i, j) = 0.
+          !var(i, j) = 0.
+          N_buff(i, j) = 0
           do n = 1, dg%k2e_nord
-            var(i, j) = var(i, j) + var_kik(lo + n, j)*k2e_coef(n, i, j)
+            N_buff(i, j) = N_buff(i, j) + N_buff_local(lo + n, j)*k2e_coef(n, i, j)
           end do
 
         end do
@@ -1080,6 +1024,7 @@ contains
 
     !--- west
     if (rmp_w) then
+!      W_buff_local=W_buff
       jmin = js
       jmax = je + jstag
 ! For few pe layouts we can extend the rmp process
@@ -1098,9 +1043,11 @@ contains
           loc = k2e_loc(i, j)
           lo = loc - offset
 
-          var(i, j) = 0.
+          !var(i, j) = 0.
+          W_buff(i, j) = 0
           do n = 1, dg%k2e_nord
-            var(i, j) = var(i, j) + var_kik(i, lo + n)*k2e_coef(n, i, j)
+            W_buff(i, j) = W_buff(i, j) + W_buff_local(i, lo + n)*k2e_coef(n, i, j)
+!write(34000+mpp_pe()) 'ii i j n var', ii,i,j,n, w_buff(i,j)
           end do
 
         end do
@@ -1110,6 +1057,7 @@ contains
 
     !--- east
     if (rmp_e) then
+!      E_buff_local=E_buff
       do ii = 1, ng
 
         i = ie + istag + ii
@@ -1119,9 +1067,10 @@ contains
           loc = k2e_loc(i, j)
           lo = loc - offset
 
-          var(i, j) = 0.
+          !var(i, j) = 0.
+          E_buff(i, j) = 0
           do n = 1, dg%k2e_nord
-            var(i, j) = var(i, j) + var_kik(i, lo + n)*k2e_coef(n, i, j)
+            E_buff(i, j) = E_buff(i, j) + E_buff_local(i, lo + n)*k2e_coef(n, i, j)
           end do
 
         end do
@@ -1129,13 +1078,367 @@ contains
       end do
     end if
 
+    call timing_off('cube_buffrmp_routine')
     !move this outside of cube_rmp to do the comms 3D
     !call fill_corners_domain_decomp(var, dg, bd, domain, istag, jstag)
 
-    deallocate (var_kik)
+  end subroutine cube_rmp_buff
 
-  end subroutine cube_rmp
-  !===========================================================================
+  subroutine create_buff_2d(var, dg, bd, N_buff, E_buff, S_buff, W_buff, istag, jstag)
+    type(duogrid_type), intent(in) :: dg
+    type(fv_grid_bounds_type), intent(IN) :: bd
+    integer, intent(in) :: istag, jstag
+    real, dimension(bd%isd:, bd%jsd:) :: var
+    real, intent(out), dimension(bd%isd:, bd%je + jstag:) :: N_buff
+    real, intent(out), dimension(bd%isd:, bd%jsd:) :: S_buff
+    real, intent(out), dimension(bd%ie + istag:, bd%jsd:) :: E_buff
+    real, intent(out), dimension(bd%isd:, bd%jsd:) :: W_buff
+
+    ! local
+    integer :: is, ie, js, je, isd, ied, jsd, jed, ng
+    integer :: i, j, ii, n
+    integer :: k, dims(3), npz
+
+    !--- assign parameters
+    is = bd%is
+    ie = bd%ie
+    js = bd%js
+    je = bd%je
+    isd = bd%isd
+    ied = bd%ied
+    jsd = bd%jsd
+    jed = bd%jed
+    ng = bd%ng
+
+    if (dg%rmp_n) then
+      do ii = 1, ng
+        do i = isd, ied + istag
+          j = je + jstag + ii
+          N_buff(i, j) = var(i, j)
+        end do
+      end do
+    end if
+
+    if (dg%rmp_e) then
+      do ii = 1, ng
+        !do j = js, je + jstag
+        do j = jsd, jed + jstag
+          i = ie + istag + ii
+          E_buff(i, j) = var(i, j)
+        end do
+      end do
+    end if
+
+    if (dg%rmp_s) then
+      do ii = 1, ng
+        do i = isd, ied + istag
+          j = js - ii
+          S_buff(i, j) = var(i, j)
+        end do
+      end do
+    end if
+
+    if (dg%rmp_w) then
+      do ii = 1, ng
+        !do j = js, je + jstag
+        do j = jsd, jed + jstag
+          i = is - ii
+          W_buff(i, j) = var(i, j)
+        end do
+      end do
+    end if
+
+  end subroutine create_buff_2d
+
+  subroutine create_buff(var, dg, bd, N_buff, E_buff, S_buff, W_buff, istag, jstag)
+    type(duogrid_type), intent(in) :: dg
+    type(fv_grid_bounds_type), intent(IN) :: bd
+    integer, intent(in) :: istag, jstag
+    real, dimension(bd%isd:, bd%jsd:, 1:) :: var
+    real, intent(out), dimension(bd%isd:, bd%je + jstag:, 1:) :: N_buff
+    real, intent(out), dimension(bd%isd:, bd%jsd:, 1:) :: S_buff
+    real, intent(out), dimension(bd%ie + istag:, bd%jsd:, 1:) :: E_buff
+    real, intent(out), dimension(bd%isd:, bd%jsd:, 1:) :: W_buff
+
+    ! local
+    integer :: is, ie, js, je, isd, ied, jsd, jed, ng
+    integer :: i, j, ii, n
+    integer :: k, dims(3), npz
+
+    !--- assign parameters
+    is = bd%is
+    ie = bd%ie
+    js = bd%js
+    je = bd%je
+    isd = bd%isd
+    ied = bd%ied
+    jsd = bd%jsd
+    jed = bd%jed
+    ng = bd%ng
+    dims = shape(var)
+    npz = dims(3)
+
+!$OMP parallel do default(none) shared(npz,dg,ng,is,ie,js,je,isd,ied,jsd,jed,istag,jstag,var,N_buff,S_buff,W_buff,E_buff)
+    do k = 1, npz
+    if (dg%rmp_n) then
+      do ii = 1, ng
+        do i = isd, ied + istag
+          j = je + jstag + ii
+          N_buff(i, j, k) = var(i, j, k)
+!if (k==1) write(mpp_pe()+321100,*) 'ijnbuff', i,j,n_buff(i,j,k), istag, jstag
+        end do
+      end do
+    end if
+
+    if (dg%rmp_e) then
+      do ii = 1, ng
+        !do j = js, je + jstag
+        do j = jsd, jed + jstag
+          i = ie + istag + ii
+          E_buff(i, j, k) = var(i, j, k)
+        end do
+      end do
+    end if
+
+    if (dg%rmp_s) then
+      do ii = 1, ng
+        do i = isd, ied + istag
+          j = js - ii
+          S_buff(i, j, k) = var(i, j, k)
+        end do
+      end do
+    end if
+
+    if (dg%rmp_w) then
+      do ii = 1, ng
+        !do j = js, je + jstag
+        do j = jsd, jed + jstag
+          i = is - ii
+          W_buff(i, j, k) = var(i, j, k)
+        end do
+      end do
+    end if
+    end do
+
+  end subroutine create_buff
+
+  subroutine apply_buff_2d(var, dg, bd, N_buff, E_buff, S_buff, W_buff, istag, jstag)
+    type(duogrid_type), intent(in) :: dg
+    type(fv_grid_bounds_type), intent(IN) :: bd
+    integer, intent(in) :: istag, jstag
+    real, dimension(bd%isd:, bd%jsd:) :: var
+    real, intent(in), dimension(bd%isd:, bd%je + jstag:) :: N_buff
+    real, intent(in), dimension(bd%isd:, bd%jsd:) :: S_buff
+    real, intent(in), dimension(bd%ie + istag:, bd%jsd:) :: E_buff
+    real, intent(in), dimension(bd%isd:, bd%jsd:) :: W_buff
+    ! local
+    integer :: is, ie, js, je, isd, ied, jsd, jed, ng
+    integer :: i, j, ii, n
+    integer :: k, dims(3), npz
+
+    !--- assign parameters
+    is = bd%is
+    ie = bd%ie
+    js = bd%js
+    je = bd%je
+    isd = bd%isd
+    ied = bd%ied
+    jsd = bd%jsd
+    jed = bd%jed
+    ng = bd%ng
+
+    if (dg%rmp_n) then
+      do ii = 1, ng
+        do i = isd, ied + istag
+          j = je + jstag + ii
+          var(i, j) = N_buff(i, j)
+!if (k==1) write(mpp_pe()+323200,*) 'ijnbuff', i,j,n_buff(i,j,k), istag, jstag
+        end do
+      end do
+    end if
+
+    if (dg%rmp_e) then
+      do ii = 1, ng
+        !do j = js, je + jstag
+        do j = jsd, jed + jstag
+          i = ie + istag + ii
+          var(i, j) = E_buff(i, j)
+!if (k==1) write(mpp_pe()+323210,*) 'ijebuff', i,j,e_buff(i,j,k)
+        end do
+      end do
+    end if
+
+    if (dg%rmp_s) then
+      do ii = 1, ng
+        do i = isd, ied + istag
+          j = js - ii
+          var(i, j) = S_buff(i, j)
+        end do
+      end do
+    end if
+
+    if (dg%rmp_w) then
+      do ii = 1, ng
+        !do j = js, je + jstag
+        do j = jsd, jed + jstag
+          i = is - ii
+          var(i, j) = W_buff(i, j)
+        end do
+      end do
+    end if
+
+  end subroutine apply_buff_2d
+
+!! APPLY 4th haloes buffs to normal three haloes u,v,uc,vc
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  subroutine apply_buff_stag(var, dg, bd, N_buff, E_buff, S_buff, W_buff, istag, jstag)
+    type(duogrid_type), intent(in) :: dg
+    type(fv_grid_bounds_type), intent(IN) :: bd
+    integer, intent(in) :: istag, jstag
+    real, dimension(bd%isd:, bd%jsd:, 1:) :: var
+    real, intent(in), dimension(dg%bd%isd:, dg%bd%je:, 1:) :: N_buff
+    real, intent(in), dimension(dg%bd%isd:, dg%bd%jsd:, 1:) :: S_buff
+    real, intent(in), dimension(dg%bd%ie:, dg%bd%jsd:, 1:) :: E_buff
+    real, intent(in), dimension(dg%bd%isd:, dg%bd%jsd:, 1:) :: W_buff
+    ! local
+    integer :: is, ie, js, je, isd, ied, jsd, jed, ng
+    integer :: i, j, ii, n
+    integer :: k, dims(3), npz
+
+    !--- assign parameters
+    is = bd%is
+    ie = bd%ie
+    js = bd%js
+    je = bd%je
+    isd = bd%isd
+    ied = bd%ied
+    jsd = bd%jsd
+    jed = bd%jed
+    ng = bd%ng
+    dims = shape(var)
+    npz = dims(3)
+
+    if (dg%rmp_s) then
+      ! south
+!$OMP parallel do default(none) shared(npz,jsd,js,isd,ied,istag,var,S_buff)
+      do k = 1, npz
+        do j = jsd, js - 1
+          do i = isd, ied + istag
+            var(i, j, k) = S_buff(i, j, k)
+          end do
+        end do
+      end do
+    end if
+
+    if (dg%rmp_n) then
+      ! north
+!$OMP parallel do default(none) shared(npz,je,jed,isd,ied,istag,jstag,var,N_buff)
+      do k = 1, npz
+        do j = je + jstag + 1, jed + jstag
+          do i = isd, ied + istag
+            var(i, j, k) = N_buff(i, j, k)
+          end do
+        end do
+      end do
+    end if
+
+    if (dg%rmp_w) then
+      ! west
+!$OMP parallel do default(none) shared(npz,jsd,jed,isd,is,jstag,var,W_buff)
+      do k = 1, npz
+        do j = jsd, jed + jstag
+          do i = isd, is - 1
+            var(i, j, k) = W_buff(i, j, k)
+          end do
+        end do
+      end do
+    end if
+
+    if (dg%rmp_e) then
+      ! east
+!$OMP parallel do default(none) shared(npz,jsd,jed,ie,ied,jstag,istag,var,E_buff)
+      do k = 1, npz
+        do j = jsd, jed + jstag
+          do i = ie + istag + 1, ied + istag
+            var(i, j, k) = E_buff(i, j, k)
+          end do
+        end do
+      end do
+    end if
+
+  end subroutine apply_buff_stag
+
+  subroutine apply_buff(var, dg, bd, N_buff, E_buff, S_buff, W_buff, istag, jstag)
+    type(duogrid_type), intent(in) :: dg
+    type(fv_grid_bounds_type), intent(IN) :: bd
+    integer, intent(in) :: istag, jstag
+    real, dimension(bd%isd:, bd%jsd:, 1:) :: var
+    real, intent(in), dimension(bd%isd:, bd%je + jstag:, 1:) :: N_buff
+    real, intent(in), dimension(bd%isd:, bd%jsd:, 1:) :: S_buff
+    real, intent(in), dimension(bd%ie + istag:, bd%jsd:, 1:) :: E_buff
+    real, intent(in), dimension(bd%isd:, bd%jsd:, 1:) :: W_buff
+    ! local
+    integer :: is, ie, js, je, isd, ied, jsd, jed, ng
+    integer :: i, j, ii, n
+    integer :: k, dims(3), npz
+
+    !--- assign parameters
+    is = bd%is
+    ie = bd%ie
+    js = bd%js
+    je = bd%je
+    isd = bd%isd
+    ied = bd%ied
+    jsd = bd%jsd
+    jed = bd%jed
+    ng = bd%ng
+    dims = shape(var)
+    npz = dims(3)
+
+!$OMP parallel do default(none) shared(npz,dg,ng,is,ie,js,je,isd,ied,jsd,jed,istag,jstag,var,N_buff,S_buff,W_buff,E_buff)
+    do k = 1, npz
+    if (dg%rmp_n) then
+      do ii = 1, ng
+        do i = isd, ied + istag
+          j = je + jstag + ii
+          var(i, j, k) = N_buff(i, j, k)
+!if (k==1) write(mpp_pe()+323200,*) 'ijnbuff', i,j,n_buff(i,j,k), istag, jstag
+        end do
+      end do
+    end if
+
+    if (dg%rmp_e) then
+      do ii = 1, ng
+        !do j = js, je + jstag
+        do j = jsd, jed + jstag
+          i = ie + istag + ii
+          var(i, j, k) = E_buff(i, j, k)
+!if (k==1) write(mpp_pe()+323210,*) 'ijebuff', i,j,e_buff(i,j,k)
+        end do
+      end do
+    end if
+
+    if (dg%rmp_s) then
+      do ii = 1, ng
+        do i = isd, ied + istag
+          j = js - ii
+          var(i, j, k) = S_buff(i, j, k)
+        end do
+      end do
+    end if
+
+    if (dg%rmp_w) then
+      do ii = 1, ng
+        !do j = js, je + jstag
+        do j = jsd, jed + jstag
+          i = is - ii
+          var(i, j, k) = W_buff(i, j, k)
+        end do
+      end do
+    end if
+    end do
+
+  end subroutine apply_buff
 
 ! The subroutine fill_corners_domain_decomp below fills the corner regions
 ! of the pes at the edges from neighboring pes.
@@ -1174,16 +1477,26 @@ contains
 !
 !
 
-  subroutine fill_corners_domain_decomp_2d(var, dg, bd, domain, istag, jstag)
+  subroutine fill_buff_corners_domain_decomp_2d(N_buff, E_buff, S_buff, W_buff, dg, bd, domain, istag, jstag)
     type(duogrid_type), intent(in) :: dg
     type(domain2d), intent(IN)         :: domain
     type(fv_grid_bounds_type), intent(IN) :: bd
     integer, intent(in) :: istag, jstag
-    real, dimension(bd%isd:, bd%jsd:) :: var
+
+    real, intent(inout), dimension(bd%isd:, bd%je + jstag:) :: N_buff
+    real, intent(inout), dimension(bd%isd:, bd%jsd:) :: S_buff
+    real, intent(inout), dimension(bd%ie + istag:, bd%jsd:) :: E_buff
+    real, intent(inout), dimension(bd%isd:, bd%jsd:) :: W_buff
+!    real, dimension(bd%isd:, bd%jsd:) :: var
     integer :: is, ie, js, je, isd, ied, jsd, jed, ng
-    integer :: i, j, layoutx, layouty, tope, frompe, gid, kk
+    integer :: i, j, layoutx, layouty, gid, kk
     integer :: tile(1), npes_per_tile
     real, dimension(1:bd%ng, 1:bd%ng) :: corner
+!    real, dimension(bd%isd:bd%ied + istag, bd%jsd:bd%jed + jstag) :: var
+    integer :: upperpelist_y(dg%layout(2)-1)
+    integer :: lowerpelist_y(dg%layout(2)-1)
+    integer :: upperpelist_x(dg%layout(1)-1)
+    integer :: lowerpelist_x(dg%layout(1)-1)
 
     is = bd%is
     ie = bd%ie
@@ -1209,50 +1522,44 @@ contains
 
       if (dg%rmp_w .and. layouty > 1) then
 
-        do kk = 1, layouty - 1
-          tope = (kk)*layoutx + (tile(1) - 1)*npes_per_tile
-          frompe = (kk - 1)*layoutx + (tile(1) - 1)*npes_per_tile
+        upperpelist_y = (/ (kk * layoutx + (tile(1) - 1) * npes_per_tile, kk = 1, layouty - 1) /)
+        lowerpelist_y = (/ ((kk - 1) * layoutx + (tile(1) - 1) * npes_per_tile, kk = 1, layouty - 1) /)
 
-          if (gid == frompe) then
-            do i = 1, ng
-              do j = 1, ng
-                corner(i, j) = var(isd + i - 1, je - ng + j)
+          if (any(gid == lowerpelist_y)) then
+            do j = 1, ng
+              do i = 1, ng
+                corner(i, j) = w_buff(isd + i - 1, je - ng + j)
               end do
             end do
-            call mpp_send(corner, size(corner), to_pe=tope)
+            call mpp_send(corner, size(corner), to_pe=(gid+layoutx))
           end if
 
-          if (gid == tope) then
-            call mpp_recv(corner, size(corner), from_pe=frompe)
-            do i = 1, ng
-              do j = 1, ng
-                var(isd + i - 1, jsd + j - 1) = corner(i, j)
-              end do
-            end do
-          end if
-
-          frompe = (kk)*layoutx + (tile(1) - 1)*npes_per_tile
-          tope = (kk - 1)*layoutx + (tile(1) - 1)*npes_per_tile
-
-          if (gid == frompe) then
-            do i = 1, ng
-              do j = 1, ng
-                corner(i, j) = var(isd + i - 1, js + jstag + j - 1)
-              end do
-            end do
-            call mpp_send(corner, size(corner), to_pe=tope)
-          end if
-
-          if (gid == tope) then
-            call mpp_recv(corner, size(corner), from_pe=frompe)
-            do i = 1, ng
-              do j = 1, ng
-                var(isd + i - 1, je + jstag + 1 + j - 1) = corner(i, j)
+          if (any(gid == upperpelist_y)) then
+            call mpp_recv(corner, size(corner), from_pe=(gid - layoutx))
+            do j = 1, ng
+              do i = 1, ng
+                w_buff(isd + i - 1, jsd + j - 1) = corner(i, j)
               end do
             end do
           end if
 
-        end do !enddo kk
+          if (any(gid == upperpelist_y)) then
+            do j = 1, ng
+              do i = 1, ng
+                corner(i, j) = w_buff(isd + i - 1, js + jstag + j - 1)
+              end do
+            end do
+            call mpp_send(corner, size(corner), to_pe=gid-layoutx)
+          end if
+
+          if (any(gid == lowerpelist_y)) then
+            call mpp_recv(corner, size(corner), from_pe=(gid+layoutx))
+            do j = 1, ng
+              do i = 1, ng
+                w_buff(isd + i - 1, je + jstag + 1 + j - 1) = corner(i, j)
+              end do
+            end do
+          end if
 
       end if !endif rmp_w
 
@@ -1262,51 +1569,45 @@ contains
 
       if (dg%rmp_e .and. layouty > 1) then
 
-        do kk = 1, layouty - 1
+        upperpelist_y = (/ (kk * layoutx + (tile - 1) * npes_per_tile +layoutx-1, kk = 1, layouty - 1) /)
+        lowerpelist_y = (/ ((kk - 1) * layoutx + (tile - 1) * npes_per_tile+layoutx-1, kk = 1, layouty - 1) /)
 
-          tope = (kk)*layoutx + (tile(1) - 1)*npes_per_tile + layoutx - 1
-          frompe = (kk - 1)*layoutx + (tile(1) - 1)*npes_per_tile + layoutx - 1
-
-          if (gid == frompe) then
-            do i = 1, ng
-              do j = 1, ng
-                corner(i, j) = var(ie + istag + 1 + i - 1, je - ng + j)
+          if (any(gid == lowerpelist_y)) then
+            do j = 1, ng
+              do i = 1, ng
+                corner(i, j) = e_buff(ie + istag + 1 + i - 1, je - ng + j)
               end do
             end do
-            call mpp_send(corner, size(corner), to_pe=tope)
+            call mpp_send(corner, size(corner), to_pe=(gid+layoutx))
           end if
 
-          if (gid == tope) then
-            call mpp_recv(corner, size(corner), from_pe=frompe)
-            do i = 1, ng
-              do j = 1, ng
-                var(ie + istag + 1 + i - 1, jsd + j - 1) = corner(i, j)
-              end do
-            end do
-          end if
-
-          frompe = (kk)*layoutx + (tile(1) - 1)*npes_per_tile + layoutx - 1
-          tope = (kk - 1)*layoutx + (tile(1) - 1)*npes_per_tile + layoutx - 1
-
-          if (gid == frompe) then
-            do i = 1, ng
-              do j = 1, ng
-                corner(i, j) = var(ie + istag + 1 + i - 1, js + jstag + j - 1)
-              end do
-            end do
-            call mpp_send(corner, size(corner), to_pe=tope)
-          end if
-
-          if (gid == tope) then
-            call mpp_recv(corner, size(corner), from_pe=frompe)
-            do i = 1, ng
-              do j = 1, ng
-                var(ie + istag + 1 + i - 1, je + jstag + 1 + j - 1) = corner(i, j)
+          if (any(gid == upperpelist_y)) then
+            call mpp_recv(corner, size(corner), from_pe=(gid - layoutx))
+            do j = 1, ng
+              do i = 1, ng
+                e_buff(ie + istag + 1 + i - 1, jsd + j - 1) = corner(i, j)
               end do
             end do
           end if
 
-        end do
+          if (any(gid == upperpelist_y)) then
+            do j = 1, ng
+              do i = 1, ng
+                corner(i, j) = e_buff(ie + istag + 1 + i - 1, js + jstag + j - 1)
+              end do
+            end do
+            call mpp_send(corner, size(corner), to_pe=(gid-layoutx))
+          end if
+
+          if (any(gid == lowerpelist_y)) then
+            call mpp_recv(corner, size(corner), from_pe=(gid + layoutx))
+            do j = 1, ng
+              do i = 1, ng
+                e_buff(ie + istag + 1 + i - 1, je + jstag + 1 + j - 1) = corner(i, j)
+              end do
+            end do
+          end if
+
       end if
 
 !!!!!!!!!!!!!!!!!!
@@ -1315,52 +1616,45 @@ contains
 
       if (dg%rmp_s .and. layoutx > 1) then
 
-        do kk = 1, layoutx - 1
+        upperpelist_x = (/ (kk + (tile(1)-1)*npes_per_tile, kk = 1, layoutx - 1) /)
+        lowerpelist_x = (/ ((kk - 1) + (tile(1) - 1) * npes_per_tile, kk = 1, layoutx - 1) /)
 
-          tope = (kk) + (tile(1) - 1)*npes_per_tile
-          frompe = (kk - 1) + (tile(1) - 1)*npes_per_tile
-
-          if (gid == frompe) then
-          do i = 1, ng
-            do j = 1, ng
-              corner(i, j) = var(ie + istag - ng + i, jsd + j - 1)
-              corner(i, j) = var(ie - ng + i, jsd + j - 1)
+          if (any(gid == lowerpelist_x)) then
+          do j = 1, ng
+            do i = 1, ng
+              corner(i, j) = s_buff(ie - ng + i, jsd + j - 1)
             end do
           end do
-          call mpp_send(corner, size(corner), to_pe=tope)
+          call mpp_send(corner, size(corner), to_pe=gid+1)
           end if
 
-          if (gid == tope) then
-            call mpp_recv(corner, size(corner), from_pe=frompe)
-            do i = 1, ng
-              do j = 1, ng
-                var(isd + i - 1, jsd + j - 1) = corner(i, j)
+          if (any(gid == upperpelist_x)) then
+            call mpp_recv(corner, size(corner), from_pe=gid-1)
+            do j = 1, ng
+              do i = 1, ng
+                s_buff(isd + i - 1, jsd + j - 1) = corner(i, j)
               end do
             end do
           end if
 
-          frompe = (kk) + (tile(1) - 1)*npes_per_tile
-          tope = (kk - 1) + (tile(1) - 1)*npes_per_tile
-
-          if (gid == frompe) then
-          do i = 1, ng
+          if (any(gid == upperpelist_x)) then
             do j = 1, ng
-              corner(i, j) = var(is + istag + i - 1, jsd + j - 1)
-            end do
+              do i = 1, ng
+                corner(i, j) = s_buff(is + istag + i - 1, jsd + j - 1)
+              end do
           end do
-          call mpp_send(corner, size(corner), to_pe=tope)
+          call mpp_send(corner, size(corner), to_pe=gid-1)
           end if
 
-          if (gid == tope) then
-            call mpp_recv(corner, size(corner), from_pe=frompe)
-            do i = 1, ng
-              do j = 1, ng
-                var(ie + istag + 1 + i - 1, jsd + j - 1) = corner(i, j)
+          if (any(gid == lowerpelist_x)) then
+            call mpp_recv(corner, size(corner), from_pe=gid+1)
+            do j = 1, ng
+              do i = 1, ng
+                s_buff(ie + istag + 1 + i - 1, jsd + j - 1) = corner(i, j)
               end do
             end do
           end if
 
-        end do
       end if
 
 !!!!!!!!!!!!!!!!!!
@@ -1369,70 +1663,78 @@ contains
 
       if (dg%rmp_n .and. layoutx > 1) then
 
-        do kk = 1, layoutx - 1
+        upperpelist_x = (/ (kk + (layoutx*(layouty - 1)) + (tile(1)-1)*npes_per_tile, kk = 1, layoutx - 1) /)
+        lowerpelist_x = (/ ((kk - 1) + (layoutx*(layouty - 1)) + (tile(1) - 1) * npes_per_tile, kk = 1, layoutx - 1) /)
 
-          tope = (kk) + (layoutx*(layouty - 1)) + (tile(1) - 1)*npes_per_tile
-          frompe = (kk - 1) + (layoutx*(layouty - 1)) + (tile(1) - 1)*npes_per_tile
-          if (gid == frompe) then
-            do i = 1, ng
-              do j = 1, ng
-                corner(i, j) = var(ie - ng + i, je + jstag + 1 + j - 1)
+          if (any(gid == lowerpelist_x)) then
+            do j = 1, ng
+              do i = 1, ng
+                corner(i, j) = n_buff(ie - ng + i, je + jstag + 1 + j - 1)
               end do
             end do
-            call mpp_send(corner, size(corner), to_pe=tope)
+            call mpp_send(corner, size(corner), to_pe=gid+1)
           end if
 
-          if (gid == tope) then
-            call mpp_recv(corner, size(corner), from_pe=frompe)
-            do i = 1, ng
-              do j = 1, ng
-                var(isd + i - 1, je + jstag + 1 + j - 1) = corner(i, j)
-              end do
-            end do
-          end if
-
-          frompe = (kk) + (layoutx*(layouty - 1)) + (tile(1) - 1)*npes_per_tile
-          tope = (kk - 1) + (layoutx*(layouty - 1)) + (tile(1) - 1)*npes_per_tile
-
-          if (gid == frompe) then
-            do i = 1, ng
-              do j = 1, ng
-                corner(i, j) = var(is + istag + i - 1, je + jstag + 1 + j - 1)
-              end do
-            end do
-            call mpp_send(corner, size(corner), to_pe=tope)
-          end if
-
-          if (gid == tope) then
-            call mpp_recv(corner, size(corner), from_pe=frompe)
-            do i = 1, ng
-              do j = 1, ng
-                var(ie + istag + 1 + i - 1, je + jstag + 1 + j - 1) = corner(i, j)
+          if (any(gid==upperpelist_x)) then
+            call mpp_recv(corner, size(corner), from_pe=gid-1)
+            do j = 1, ng
+              do i = 1, ng
+                n_buff(isd + i - 1, je + jstag + 1 + j - 1) = corner(i, j)
               end do
             end do
           end if
 
-        end do ! kk
+          if (any(gid==upperpelist_x)) then
+            do j = 1, ng
+              do i = 1, ng
+                corner(i, j) = n_buff(is + istag + i - 1, je + jstag + 1 + j - 1)
+              end do
+            end do
+            call mpp_send(corner, size(corner), to_pe=gid-1)
+          end if
+
+          if (any(gid==lowerpelist_x)) then
+            call mpp_recv(corner, size(corner), from_pe=gid+1)
+            do j = 1, ng
+              do i = 1, ng
+                n_buff(ie + istag + 1 + i - 1, je + jstag + 1 + j - 1) = corner(i, j)
+              end do
+            end do
+          end if
+
       end if ! rmpn
 
     end if ! layoux+layouty>2
 
-  end subroutine fill_corners_domain_decomp_2d
+  end subroutine fill_buff_corners_domain_decomp_2d
 
-  subroutine fill_corners_domain_decomp_3d(var, dg, bd, domain, istag, jstag)
+  subroutine fill_buff_corners_domain_decomp_3d(N_buff, E_buff, S_buff, W_buff, dg, bd, domain, istag, jstag)
     type(duogrid_type), intent(in) :: dg
     type(domain2d), intent(IN)         :: domain
     type(fv_grid_bounds_type), intent(IN) :: bd
     integer, intent(in) :: istag, jstag
-    real, dimension(bd%isd:, bd%jsd:, 1:) :: var
+
+    !real, intent(inout), dimension( bd%isd:bd%ied + istag, 1:bd%ng, 1:) :: N_buff
+    !real, intent(inout), dimension( bd%isd:bd%ied + istag, 1:bd%ng, 1:) :: S_buff
+    !real, intent(inout), dimension( 1:bd%ng, bd%jsd:bd%jed + jstag, 1:) :: E_buff
+    !real, intent(inout), dimension( 1:bd%ng, bd%jsd:bd%jed + jstag, 1:) :: W_buff
+    real, intent(inout), dimension(bd%isd:, bd%je + jstag:, 1:) :: N_buff
+    real, intent(inout), dimension(bd%isd:, bd%jsd:, 1:) :: S_buff
+    real, intent(inout), dimension(bd%ie + istag:, bd%jsd:, 1:) :: E_buff
+    real, intent(inout), dimension(bd%isd:, bd%jsd:, 1:) :: W_buff
+    !real, dimension(bd%isd:, bd%jsd:, 1:) :: var
     real, allocatable, dimension(:, :, :) :: corner
     ! real, dimension(1:bd%ng, 1:bd%ng) :: corner
 
     integer :: is, ie, js, je, isd, ied, jsd, jed, ng
-    integer :: i, j, layoutx, layouty, tope, frompe, gid, k, kk
+    integer :: i, j, layoutx, layouty, gid, k, kk
     integer :: tile(1), npes_per_tile, npz, dims(3)
+    integer :: upperpelist_y(dg%layout(2)-1)
+    integer :: lowerpelist_y(dg%layout(2)-1)
+    integer :: upperpelist_x(dg%layout(1)-1)
+    integer :: lowerpelist_x(dg%layout(1)-1)
 
-    dims = shape(var)
+    dims = shape(N_buff)
     npz = dims(3)
 
     allocate (corner(1:bd%ng, 1:bd%ng, 1:npz))
@@ -1461,58 +1763,60 @@ contains
 
       if (dg%rmp_w .and. layouty > 1) then
 
-        do kk = 1, layouty - 1
-          tope = (kk)*layoutx + (tile(1) - 1)*npes_per_tile
-          frompe = (kk - 1)*layoutx + (tile(1) - 1)*npes_per_tile
+        upperpelist_y = (/ (kk * layoutx + (tile(1) - 1) * npes_per_tile, kk = 1, layouty - 1) /)
+        lowerpelist_y = (/ ((kk - 1) * layoutx + (tile(1) - 1) * npes_per_tile, kk = 1, layouty - 1) /)
 
-          if (gid == frompe) then
+! Lower to upper
+!!!!!!!!!!!!!!!!
+          if (any(gid == lowerpelist_y)) then
+!$OMP parallel do default(none) shared(npz,ng,corner,w_buff,isd,je)
             do k = 1, npz
-              do i = 1, ng
-                do j = 1, ng
-                  corner(i, j, k) = var(isd + i - 1, je - ng + j, k)
+              do j = 1, ng
+                do i = 1, ng
+                  corner(i, j, k) = w_buff(isd + i - 1, je - ng + j, k)
                 end do
               end do
             end do
-            call mpp_send(corner, size(corner), to_pe=tope)
+            call mpp_send(corner, size(corner), to_pe=(gid+layoutx))
           end if
 
-          if (gid == tope) then
-            call mpp_recv(corner, size(corner), from_pe=frompe)
+          if (any(gid == upperpelist_y)) then
+            call mpp_recv(corner, size(corner), from_pe=(gid - layoutx))
+!$OMP parallel do default(none) shared(npz,ng,corner,w_buff,isd,jsd)
             do k = 1, npz
-              do i = 1, ng
-                do j = 1, ng
-                  var(isd + i - 1, jsd + j - 1, k) = corner(i, j, k)
-                end do
-              end do
-            end do
-          end if
-
-          frompe = (kk)*layoutx + (tile(1) - 1)*npes_per_tile
-          tope = (kk - 1)*layoutx + (tile(1) - 1)*npes_per_tile
-
-          if (gid == frompe) then
-            do k = 1, npz
-              do i = 1, ng
-                do j = 1, ng
-                  corner(i, j, k) = var(isd + i - 1, js + jstag + j - 1, k)
-                end do
-              end do
-            end do
-            call mpp_send(corner, size(corner), to_pe=tope)
-          end if
-
-          if (gid == tope) then
-            call mpp_recv(corner, size(corner), from_pe=frompe)
-            do k = 1, npz
-              do i = 1, ng
-                do j = 1, ng
-                  var(isd + i - 1, je + jstag + 1 + j - 1, k) = corner(i, j, k)
+              do j = 1, ng
+                do i = 1, ng
+                  w_buff(isd + i - 1, jsd + j - 1, k) = corner(i, j, k)
                 end do
               end do
             end do
           end if
 
-        end do !enddo kk
+! Upper to Lower
+!!!!!!!!!!!!!!!!
+          if (any(gid == upperpelist_y)) then
+!$OMP parallel do default(none) shared(npz,ng,corner,w_buff,isd,js,jstag)
+            do k = 1, npz
+              do j = 1, ng
+                do i = 1, ng
+                  corner(i, j, k) = w_buff(isd + i - 1, js + jstag + j - 1, k)
+                end do
+              end do
+            end do
+            call mpp_send(corner, size(corner), to_pe=gid-layoutx)
+          end if
+
+          if (any(gid == lowerpelist_y)) then
+            call mpp_recv(corner, size(corner), from_pe=gid+layoutx)
+!$OMP parallel do default(none) shared(npz,ng,corner,w_buff,isd,je,jstag)
+            do k = 1, npz
+              do j = 1, ng
+                do i = 1, ng
+                  w_buff(isd + i - 1, je + jstag + 1 + j - 1, k) = corner(i, j, k)
+                end do
+              end do
+            end do
+          end if
 
       end if !endif rmp_w
 
@@ -1522,59 +1826,57 @@ contains
 
       if (dg%rmp_e .and. layouty > 1) then
 
-        do kk = 1, layouty - 1
+        upperpelist_y = (/ (kk * layoutx + (tile - 1) * npes_per_tile +layoutx-1, kk = 1, layouty - 1) /)
+        lowerpelist_y = (/ ((kk - 1) * layoutx + (tile - 1) * npes_per_tile+layoutx-1, kk = 1, layouty - 1) /)
 
-          tope = (kk)*layoutx + (tile(1) - 1)*npes_per_tile + layoutx - 1
-          frompe = (kk - 1)*layoutx + (tile(1) - 1)*npes_per_tile + layoutx - 1
-
-          if (gid == frompe) then
+          if (any(gid == lowerpelist_y)) then
+!$OMP parallel do default(none) shared(npz,ng,corner,e_buff,ie,je,istag)
             do k = 1, npz
-              do i = 1, ng
-                do j = 1, ng
-                  corner(i, j, k) = var(ie + istag + 1 + i - 1, je - ng + j, k)
+              do j = 1, ng
+                do i = 1, ng
+                  corner(i, j, k) = e_buff(ie + istag + 1 + i - 1, je - ng + j, k)
                 end do
               end do
             end do
-            call mpp_send(corner, size(corner), to_pe=tope)
+            call mpp_send(corner, size(corner), to_pe=gid+layoutx)
           end if
 
-          if (gid == tope) then
-            call mpp_recv(corner, size(corner), from_pe=frompe)
+          if (any(gid == upperpelist_y)) then
+            call mpp_recv(corner, size(corner), from_pe=gid-layoutx)
+!$OMP parallel do default(none) shared(npz,ng,corner,e_buff,ie,jsd,istag)
             do k = 1, npz
-              do i = 1, ng
-                do j = 1, ng
-                  var(ie + istag + 1 + i - 1, jsd + j - 1, k) = corner(i, j, k)
-                end do
-              end do
-            end do
-          end if
-
-          frompe = (kk)*layoutx + (tile(1) - 1)*npes_per_tile + layoutx - 1
-          tope = (kk - 1)*layoutx + (tile(1) - 1)*npes_per_tile + layoutx - 1
-
-          if (gid == frompe) then
-            do k = 1, npz
-              do i = 1, ng
-                do j = 1, ng
-                  corner(i, j, k) = var(ie + istag + 1 + i - 1, js + jstag + j - 1, k)
-                end do
-              end do
-            end do
-            call mpp_send(corner, size(corner), to_pe=tope)
-          end if
-
-          if (gid == tope) then
-            call mpp_recv(corner, size(corner), from_pe=frompe)
-            do k = 1, npz
-              do i = 1, ng
-                do j = 1, ng
-                  var(ie + istag + 1 + i - 1, je + jstag + 1 + j - 1, k) = corner(i, j, k)
+              do j = 1, ng
+                do i = 1, ng
+                  e_buff(ie + istag + 1 + i - 1, jsd + j - 1, k) = corner(i, j, k)
                 end do
               end do
             end do
           end if
 
-        end do
+          if (any(gid == upperpelist_y)) then
+!$OMP parallel do default(none) shared(npz,ng,corner,e_buff,ie,js,istag,jstag)
+            do k = 1, npz
+              do j = 1, ng
+                do i = 1, ng
+                  corner(i, j, k) = e_buff(ie + istag + 1 + i - 1, js + jstag + j - 1, k)
+                end do
+              end do
+            end do
+            call mpp_send(corner, size(corner), to_pe=gid-layoutx)
+          end if
+
+          if (any(gid == lowerpelist_y)) then
+            call mpp_recv(corner, size(corner), from_pe=gid+layoutx)
+!$OMP parallel do default(none) shared(npz,ng,corner,e_buff,ie,je,istag,jstag)
+            do k = 1, npz
+              do j = 1, ng
+                do i = 1, ng
+                  e_buff(ie + istag + 1 + i - 1, je + jstag + 1 + j - 1, k) = corner(i, j, k)
+                end do
+              end do
+            end do
+          end if
+
       end if
 
 !!!!!!!!!!!!!!!!!!
@@ -1583,59 +1885,57 @@ contains
 
       if (dg%rmp_s .and. layoutx > 1) then
 
-        do kk = 1, layoutx - 1
+        upperpelist_x = (/ (kk + (tile(1)-1)*npes_per_tile, kk = 1, layoutx - 1) /)
+        lowerpelist_x = (/ ((kk - 1) + (tile(1) - 1) * npes_per_tile, kk = 1, layoutx - 1) /)
 
-          tope = (kk) + (tile(1) - 1)*npes_per_tile
-          frompe = (kk - 1) + (tile(1) - 1)*npes_per_tile
-
-          if (gid == frompe) then
+          if (any(gid == lowerpelist_x)) then
+!$OMP parallel do default(none) shared(npz,ng,corner,s_buff,ie,jsd)
             do k = 1, npz
-              do i = 1, ng
-                do j = 1, ng
-                  corner(i, j, k) = var(ie - ng + i, jsd + j - 1, k)
+              do j = 1, ng
+                do i = 1, ng
+                  corner(i, j, k) = s_buff(ie - ng + i, jsd + j - 1, k)
                 end do
               end do
             end do
-            call mpp_send(corner, size(corner), to_pe=tope)
+            call mpp_send(corner, size(corner), to_pe=gid+1)
           end if
 
-          if (gid == tope) then
-            call mpp_recv(corner, size(corner), from_pe=frompe)
+          if (any(gid == upperpelist_x)) then
+            call mpp_recv(corner, size(corner), from_pe=gid-1)
+!$OMP parallel do default(none) shared(npz,ng,corner,s_buff,isd,jsd)
             do k = 1, npz
-              do i = 1, ng
-                do j = 1, ng
-                  var(isd + i - 1, jsd + j - 1, k) = corner(i, j, k)
-                end do
-              end do
-            end do
-          end if
-
-          frompe = (kk) + (tile(1) - 1)*npes_per_tile
-          tope = (kk - 1) + (tile(1) - 1)*npes_per_tile
-
-          if (gid == frompe) then
-            do k = 1, npz
-              do i = 1, ng
-                do j = 1, ng
-                  corner(i, j, k) = var(is + istag + i - 1, jsd + j - 1, k)
-                end do
-              end do
-            end do
-            call mpp_send(corner, size(corner), to_pe=tope)
-          end if
-
-          if (gid == tope) then
-            call mpp_recv(corner, size(corner), from_pe=frompe)
-            do k = 1, npz
-              do i = 1, ng
-                do j = 1, ng
-                  var(ie + istag + 1 + i - 1, jsd + j - 1, k) = corner(i, j, k)
+              do j = 1, ng
+                do i = 1, ng
+                  s_buff(isd + i - 1, jsd + j - 1, k) = corner(i, j, k)
                 end do
               end do
             end do
           end if
 
-        end do
+          if (any(gid == upperpelist_x)) then
+!$OMP parallel do default(none) shared(npz,ng,corner,s_buff,is,jsd,istag)
+            do k = 1, npz
+              do j = 1, ng
+                do i = 1, ng
+                  corner(i, j, k) = s_buff(is + istag + i - 1, jsd + j - 1, k)
+                end do
+              end do
+            end do
+            call mpp_send(corner, size(corner), to_pe=gid-1)
+          end if
+
+          if (any(gid == lowerpelist_x)) then
+            call mpp_recv(corner, size(corner), from_pe=gid+1)
+!$OMP parallel do default(none) shared(npz,ng,corner,s_buff,ie,istag,jsd)
+            do k = 1, npz
+              do j = 1, ng
+                do i = 1, ng
+                  s_buff(ie + istag + 1 + i - 1, jsd + j - 1, k) = corner(i, j, k)
+                end do
+              end do
+            end do
+          end if
+
       end if
 
 !!!!!!!!!!!!!!!!!!
@@ -1644,65 +1944,320 @@ contains
 
       if (dg%rmp_n .and. layoutx > 1) then
 
-        do kk = 1, layoutx - 1
+        upperpelist_x = (/ (kk + (layoutx*(layouty - 1)) + (tile(1)-1)*npes_per_tile, kk = 1, layoutx - 1) /)
+        lowerpelist_x = (/ ((kk - 1) + (layoutx*(layouty - 1)) + (tile(1) - 1) * npes_per_tile, kk = 1, layoutx - 1) /)
 
-          tope = (kk) + (layoutx*(layouty - 1)) + (tile(1) - 1)*npes_per_tile
-          frompe = (kk - 1) + (layoutx*(layouty - 1)) + (tile(1) - 1)*npes_per_tile
-          if (gid == frompe) then
+          if (any(gid == lowerpelist_x)) then
+!$OMP parallel do default(none) shared(npz,ng,corner,n_buff,ie,je,jstag)
             do k = 1, npz
-              do i = 1, ng
-                do j = 1, ng
-                  corner(i, j, k) = var(ie - ng + i, je + jstag + 1 + j - 1, k)
+              do j = 1, ng
+                do i = 1, ng
+                  corner(i, j, k) = n_buff(ie - ng + i, je + jstag + 1 + j - 1, k)
                 end do
               end do
             end do
-            call mpp_send(corner, size(corner), to_pe=tope)
+            call mpp_send(corner, size(corner), to_pe=gid+1)
           end if
 
-          if (gid == tope) then
-            call mpp_recv(corner, size(corner), from_pe=frompe)
+          if (any (gid==upperpelist_x)) then
+            call mpp_recv(corner, size(corner), from_pe=gid-1)
+!$OMP parallel do default(none) shared(npz,ng,corner,n_buff,isd,je,jstag)
             do k = 1, npz
-              do i = 1, ng
-                do j = 1, ng
-                  var(isd + i - 1, je + jstag + 1 + j - 1, k) = corner(i, j, k)
-                end do
-              end do
-            end do
-          end if
-
-          frompe = (kk) + (layoutx*(layouty - 1)) + (tile(1) - 1)*npes_per_tile
-          tope = (kk - 1) + (layoutx*(layouty - 1)) + (tile(1) - 1)*npes_per_tile
-
-          if (gid == frompe) then
-            do k = 1, npz
-              do i = 1, ng
-                do j = 1, ng
-                  corner(i, j, k) = var(is + istag + i - 1, je + jstag + 1 + j - 1, k)
-                end do
-              end do
-            end do
-            call mpp_send(corner, size(corner), to_pe=tope)
-          end if
-
-          if (gid == tope) then
-            call mpp_recv(corner, size(corner), from_pe=frompe)
-            do k = 1, npz
-              do i = 1, ng
-                do j = 1, ng
-                  var(ie + istag + 1 + i - 1, je + jstag + 1 + j - 1, k) = corner(i, j, k)
+              do j = 1, ng
+                do i = 1, ng
+                  n_buff(isd + i - 1, je + jstag + 1 + j - 1, k) = corner(i, j, k)
                 end do
               end do
             end do
           end if
 
-        end do ! kk
+          if (any(gid==upperpelist_x)) then
+!$OMP parallel do default(none) shared(npz,ng,corner,n_buff,is,je,istag,jstag)
+            do k = 1, npz
+              do j = 1, ng
+                do i = 1, ng
+                  corner(i, j, k) = n_buff(is + istag + i - 1, je + jstag + 1 + j - 1, k)
+                end do
+              end do
+            end do
+            call mpp_send(corner, size(corner), to_pe=gid-1)
+          end if
+
+          if (any(gid==lowerpelist_x)) then
+            call mpp_recv(corner, size(corner), from_pe=gid+1)
+!$OMP parallel do default(none) shared(npz,ng,corner,n_buff,ie,je,istag,jstag)
+            do k = 1, npz
+              do j = 1, ng
+                do i = 1, ng
+                  n_buff(ie + istag + 1 + i - 1, je + jstag + 1 + j - 1, k) = corner(i, j, k)
+                end do
+              end do
+            end do
+          end if
+
       end if ! rmpn
 
     end if ! layoux+layouty>2
 
     deallocate (corner)
 
-  end subroutine fill_corners_domain_decomp_3d
+  end subroutine fill_buff_corners_domain_decomp_3d
+
+  subroutine fill_corner_buffer(N_buff, E_buff, S_buff, W_buff, bd, dg, istag, jstag)
+    type(fv_grid_bounds_type), intent(IN) :: bd
+    type(duogrid_type), target, intent(in) :: dg
+    integer, intent(IN) :: istag, jstag
+    real, intent(inout), dimension(bd%isd:, bd%je + jstag:) :: N_buff
+    real, intent(inout), dimension(bd%isd:, bd%jsd:) :: S_buff
+    real, intent(inout), dimension(bd%ie + istag:, bd%jsd:) :: E_buff
+    real, intent(inout), dimension(bd%isd:, bd%jsd:) :: W_buff
+
+    integer :: i, j, is, ie, js, je, isd, ied, jsd, jed, ng
+    !integer :: interporder = 3 !order is interporder+1
+
+    real, dimension(bd%isd:bd%ied + istag, bd%jsd:bd%jed + jstag) :: veltemp
+    real, dimension(bd%isd:bd%ied + istag, bd%jsd:bd%jed + jstag) :: veltempp
+    real :: temp1, temp2
+
+    real(kind=R_GRID), pointer, dimension(:, :, :, :) :: xp
+    real(kind=R_GRID), pointer, dimension(:, :, :, :) :: xm
+    real(kind=R_GRID), pointer, dimension(:, :, :, :) :: yp
+    real(kind=R_GRID), pointer, dimension(:, :, :, :) :: ym
+
+    call timing_on('lagbuff')
+
+    if (istag == 0 .and. jstag == 0) then
+      xp => dg%xp
+      xm => dg%xm
+      yp => dg%yp
+      ym => dg%ym
+    end if
+    if (istag == 1 .and. jstag == 1) then
+      xp => dg%xp3
+      xm => dg%xm3
+      yp => dg%yp3
+      ym => dg%ym3
+    end if
+
+    is = bd%is
+    ie = bd%ie
+    js = bd%js
+    je = bd%je
+    isd = bd%isd
+    ied = bd%ied
+    jsd = bd%jsd
+    jed = bd%jed
+    ng= bd%ng
+
+    !lastpoint in compute domain
+    ie = ie + istag
+    je = je + jstag
+
+      call timing_on('fillcornerbuffer_routine')
+    ! NE corner
+!     |   1--2--3
+!     |   |     |
+!     |   4  5  6
+!     |   |     |
+!     |   7--8--9
+!     -------------
+
+! XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+! TAKING THE AVERAGE OF BOTH SIDES INTERPOLATIONS
+! IS GIVING LESS ERRORS COMPARED TO ONE INTERPOLATION FORM EACH BUFFER
+! XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+    if (dg%rmp_ne) then
+
+!     do i=ie+1,ie+bd%ng
+!       do j=je+1,je+bd%ng
+!         if (j>i) then ! 1 2 4
+!           call lagrange_poly_buff(N_buff, i, j, bd, dg, 'X+', istag, jstag, interporder, isd, je)
+!           E_buff(i,j)=N_buff(i,j)
+!         elseif (i>j) then !8 9 6
+!           call lagrange_poly_buff(E_buff, i, j, bd, dg, 'Y+', istag, jstag, interporder, ie, jsd)
+!           N_buff(i,j)=E_buff(i,j)
+!         endif
+!       enddo
+!     enddo
+
+!diag
+      do i = ie + 1, ie + ng
+        do j = je + 1, je + ng
+!         if (j==i) then ! 7 5 3
+          call lagrange_poly_buff_fast(N_buff(:,j), i, xp(:,i,j,2*istag+jstag+1), istag, jstag, interporder, isd, bd%ie)
+!          call lagrange_poly_buff(N_buff, i, j, bd, dg, 'X+', istag, jstag, interporder, isd, je)
+          temp1 = N_buff(i, j)
+          call lagrange_poly_buff_fast(E_buff(i,:), j, yp(:,i,j,2*istag+jstag+1), istag, jstag, interporder, jsd, bd%je)
+
+         ! call lagrange_poly_buff(E_buff, i, j, bd, dg, 'Y+', istag, jstag, interporder, ie, jsd)
+          temp2 = E_buff(i, j)
+          N_buff(i, j) = (temp1 + temp2)*0.5
+!           if (i==ie+1) then
+!           N_buff(i,j)=0.5*(N_buff(i+1, j) + N_buff(i, j+1))
+!           elseif (i==ie+bd%ng) then
+!            N_buff(i,j)=0.5*(N_buff(i-1, j) + N_buff(i, j-1))
+!           else
+!            N_buff(i,j)=0.25*(N_buff(i-1, j) + N_buff(i, j-1) + N_buff(i+1,j) + N_buff(i,j+1))
+!           endif
+!         endif
+          E_buff(i, j) = N_buff(i, j)
+        end do
+      end do
+
+    end if
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+    ! NW
+!        1--2--3 |
+!        |     | |
+!        4  5  6 |
+!        |     | |
+!        7--8--9 |
+!        ---------
+
+    if (dg%rmp_nw) then
+
+!     do i=is-1,is-bd%ng,-1
+!       do j=je+1,je+bd%ng
+!         if (j-(je+1)>abs(i)) then ! 1 2 4
+!           call lagrange_poly_buff(N_buff, i, j, bd, dg, 'X-', istag, jstag, interporder, isd, je)
+!           W_buff(i,j)=N_buff(i,j)
+!         elseif (abs(i)>j-(je+1)) then !8 9 6
+!           call lagrange_poly_buff(W_buff, i, j, bd, dg, 'Y+', istag, jstag, interporder, isd, jsd)
+!           N_buff(i,j)=W_buff(i,j)
+!         endif
+!       enddo
+!     enddo
+
+!diag
+      do i = is - 1, is - ng, -1
+        do j = je + 1, je + ng
+          !if (j-(je+1)==abs(i)) then ! 7 5 3
+          !call lagrange_poly_buff(N_buff, i, j, bd, dg, 'X-', istag, jstag, interporder, isd, je)
+          call lagrange_poly_buff_fast_minus(N_buff(:,j), i, xm(:,i,j,2*istag+jstag+1), istag, jstag, interporder, isd, bd%is)
+          temp1 = N_buff(i, j)
+          !call lagrange_poly_buff(W_buff, i, j, bd, dg, 'Y+', istag, jstag, interporder, isd, jsd)
+          call lagrange_poly_buff_fast(W_buff(i,:), j, yp(:,i,j,2*istag+jstag+1), istag, jstag, interporder, jsd, bd%je)
+          temp2 = W_buff(i, j)
+          N_buff(i, j) = (temp1 + temp2)*0.5
+          !   if (i==is-1) then
+          !    N_buff(i,j)=0.5*(N_buff(i-1, j) + N_buff(i, j+1))
+          !   elseif (i==is-bd%ng) then
+          !    N_buff(i,j)=0.5*(N_buff(i+1, j) + N_buff(i, j-1))
+          !   else
+          !    N_buff(i,j)=0.25*(N_buff(i-1, j) + N_buff(i, j-1) + N_buff(i+1,j) + N_buff(i,j+1))
+          !   endif
+          ! endif
+          W_buff(i, j) = N_buff(i, j)
+        end do
+      end do
+
+    end if
+!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!    ! SE corner
+!!     --------------
+!!     |   1--2--3
+!!     |   |     |
+!!     |   4  5  6
+!!     |   |     |
+!!     |   7--8--9
+!!
+    if (dg%rmp_se) then
+
+!     do i=ie+1,ie+bd%ng
+!       do j=js-1,js-bd%ng,-1
+!         if (i-(ie+1)>abs(j)) then !2 3 6
+!           call lagrange_poly_buff(E_buff, i, j, bd, dg, 'Y-', istag, jstag, interporder, ie, jsd)
+!           S_buff(i,j)=E_buff(i,j)
+!         elseif (abs(j)>i-(ie+1)) then !4 7 8
+!           call lagrange_poly_buff(S_buff, i, j, bd, dg, 'X+', istag, jstag, interporder, isd, jsd)
+!           E_buff(i,j)=S_buff(i,j)
+!         endif
+!       enddo
+!     enddo
+
+!diag
+      do i = ie + 1, ie + ng
+        do j = js - 1, js - ng, -1
+          !if (i-(ie+1)==abs(j)) then ! 7 5 3
+          !call lagrange_poly_buff(E_buff, i, j, bd, dg, 'Y-', istag, jstag, interporder, ie, jsd)
+          call lagrange_poly_buff_fast_minus(E_buff(i,:), j, ym(:,i,j,2*istag+jstag+1), istag, jstag, interporder, jsd, bd%js)
+          temp1 = E_buff(i, j)
+          !call lagrange_poly_buff(S_buff, i, j, bd, dg, 'X+', istag, jstag, interporder, isd, jsd)
+          call lagrange_poly_buff_fast(S_buff(:,j), i, xp(:,i,j,2*istag+jstag+1), istag, jstag, interporder, isd, bd%ie)
+          temp2 = S_buff(i, j)
+          S_buff(i, j) = (temp1 + temp2)*0.5
+          !   if (j==js-1) then
+          !    S_buff(i,j)=0.5*(S_buff(i+1, j) + S_buff(i, j-1))
+          !   elseif (j==js-bd%ng) then
+          !    S_buff(i,j)=0.5*(S_buff(i-1, j) + S_buff(i, j+1))
+          !   else
+          !    S_buff(i,j)=0.25*(S_buff(i-1, j) + S_buff(i, j-1) + S_buff(i+1,j) + S_buff(i,j+1))
+          !   endif
+          ! endif
+          E_buff(i, j) = S_buff(i, j)
+        end do
+      end do
+
+    end if
+!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!    ! SW corner
+!!     -------------
+!!        1--2--3  |
+!!        |     |  |
+!!        4  5  6  |
+!!        |     |  |
+!!        7--8--9  |
+!!
+!
+    if (dg%rmp_sw) then
+
+!     do i=is-1,isd,-1
+!       do j=js-1,jsd,-1
+!         if (abs(j)>abs(i)) then ! 1 2 4
+!           call lagrange_poly_buff(S_buff, i, j, bd, dg, 'X-', istag, jstag, interporder, isd, jsd)
+!           W_buff(i,j)=S_buff(i,j)
+!         elseif (abs(i)>abs(j)) then !8 9 6
+!           call lagrange_poly_buff(W_buff, i, j, bd, dg, 'Y-', istag, jstag, interporder, isd, jsd)
+!           S_buff(i,j)=W_buff(i,j)
+!         endif
+!       enddo
+!     enddo
+
+!diag
+      do i = is - 1, isd, -1
+        do j = js - 1, jsd, -1
+          ! if (j==i) then ! 7 5 3
+          !call lagrange_poly_buff(S_buff, i, j, bd, dg, 'X-', istag, jstag, interporder, isd, jsd)
+          call lagrange_poly_buff_fast_minus(S_buff(:,j), i, xm(:,i,j,2*istag+jstag+1), istag, jstag, interporder, isd, bd%is)
+          temp1 = S_buff(i, j)
+          !call lagrange_poly_buff(W_buff, i, j, bd, dg, 'Y-', istag, jstag, interporder, isd, jsd)
+          call lagrange_poly_buff_fast_minus(W_buff(i,:), j, ym(:,i,j,2*istag+jstag+1), istag, jstag, interporder, jsd, bd%js)
+          temp2 = W_buff(i, j)
+          S_buff(i, j) = (temp1 + temp2)*0.5
+          !if (i==isd) then
+          ! S_buff(i,j)=0.5*(S_buff(i+1, j) + S_buff(i, j+1))
+          !elseif (i==is-1) then
+          ! S_buff(i,j)=0.5*(S_buff(i-1, j) + S_buff(i, j-1))
+          !else
+          ! S_buff(i,j)=0.25*(S_buff(i-1, j) + S_buff(i, j-1) + S_buff(i+1,j) + S_buff(i,j+1))
+          !endif
+          ! endif
+          W_buff(i, j) = S_buff(i, j)
+        end do
+      end do
+
+    end if
+
+      call timing_off('fillcornerbuffer_routine')
+  end subroutine fill_corner_buffer
 
 ! subroutine fill_corner_region will fill the corner regions of pes lying on
 ! the corners of the cubes sphere nw, ne, se, sw.
@@ -1715,425 +2270,6 @@ contains
 ! In addition, using the lagrangian interpolation function for extrapolation
 ! purposes is not highly recommended in general; however, it is tolerable in this case given that
 ! the extrapolation is performed for couple points just outside of the domain on which the data reside.
-
-  subroutine fill_corner_region_2d(vel, bd, dg, istag, jstag)
-    type(fv_grid_bounds_type), intent(IN) :: bd
-    type(duogrid_type), intent(in) :: dg
-    integer, intent(IN) :: istag, jstag
-    real, dimension(bd%isd:, bd%jsd:) :: vel
-
-    integer :: i, j, is, ie, js, je, isd, ied, jsd, jed
-    !integer :: interporder = 3 !order is interporder+1
-
-    real, dimension(bd%isd:bd%ied + istag, bd%jsd:bd%jed + jstag) :: veltemp
-    real, dimension(bd%isd:bd%ied + istag, bd%jsd:bd%jed + jstag) :: veltempp
-    is = bd%is
-    ie = bd%ie
-    js = bd%js
-    je = bd%je
-    isd = bd%isd
-    ied = bd%ied
-    jsd = bd%jsd
-    jed = bd%jed
-
-    !lastpoint in compute domain
-    ie = ie + istag
-    je = je + jstag
-
-    ! NE corner
-!     |   1--2--3
-!     |   |     |
-!     |   4  5  6
-!     |   |     |
-!     |   7--8--9
-!     -------------
-
-    if (dg%rmp_ne) then
-      call lagrange_poly_interp(vel, ie + 1, je + 2, bd, dg, 'X+', istag, jstag, interporder) !4
-      call lagrange_poly_interp(vel, ie + 1, je + 3, bd, dg, 'X+', istag, jstag, interporder) !1
-      call lagrange_poly_interp(vel, ie + 2, je + 3, bd, dg, 'X+', istag, jstag, interporder) !2
-      call lagrange_poly_interp(vel, ie + 2, je + 1, bd, dg, 'Y+', istag, jstag, interporder) !8
-      call lagrange_poly_interp(vel, ie + 3, je + 1, bd, dg, 'Y+', istag, jstag, interporder) !9
-      call lagrange_poly_interp(vel, ie + 3, je + 2, bd, dg, 'Y+', istag, jstag, interporder) !6
-
-      veltemp = vel
-      veltempp = vel
-
-      !diag
-      i = ie + 1
-      j = je + 1
-      call lagrange_poly_interp(veltemp, i, j, bd, dg, 'X+', istag, jstag, interporder)
-      call lagrange_poly_interp(veltempp, i, j, bd, dg, 'Y+', istag, jstag, interporder)
-      vel(i, j) = 0.5*(veltemp(i, j) + veltempp(i, j))
-
-      i = ie + 3
-      j = je + 3
-      call lagrange_poly_interp(veltemp, i, j, bd, dg, 'X+', istag, jstag, interporder)
-      call lagrange_poly_interp(veltempp, i, j, bd, dg, 'Y+', istag, jstag, interporder)
-      vel(i, j) = 0.5*(veltemp(i, j) + veltempp(i, j))
-
-      i = ie + 2
-      j = je + 2
-      call lagrange_poly_interp(veltemp, i, j, bd, dg, 'X+', istag, jstag, interporder)
-      call lagrange_poly_interp(veltempp, i, j, bd, dg, 'Y+', istag, jstag, interporder)
-      vel(i, j) = 0.5*(veltemp(i, j) + veltempp(i, j))
-    end if
-
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-    ! NW
-!        1--2--3 |
-!        |     | |
-!        4  5  6 |
-!        |     | |
-!        7--8--9 |
-!        ---------
-
-    if (dg%rmp_nw) then
-      call lagrange_poly_interp(vel, is - 1, je + 2, bd, dg, 'X-', istag, jstag, interporder) !6
-      call lagrange_poly_interp(vel, is - 1, je + 3, bd, dg, 'X-', istag, jstag, interporder) !3
-      call lagrange_poly_interp(vel, is - 2, je + 3, bd, dg, 'X-', istag, jstag, interporder) !2
-      call lagrange_poly_interp(vel, is - 2, je + 1, bd, dg, 'Y+', istag, jstag, interporder) !8
-      call lagrange_poly_interp(vel, is - 3, je + 1, bd, dg, 'Y+', istag, jstag, interporder) !7
-      call lagrange_poly_interp(vel, is - 3, je + 2, bd, dg, 'Y+', istag, jstag, interporder) !4
-
-      veltemp = vel
-      veltempp = vel
-
-      !diag
-      i = is - 1
-      j = je + 1
-      call lagrange_poly_interp(veltemp, i, j, bd, dg, 'X-', istag, jstag, interporder)
-      call lagrange_poly_interp(veltempp, i, j, bd, dg, 'Y+', istag, jstag, interporder)
-      vel(i, j) = 0.5*(veltemp(i, j) + veltempp(i, j))
-
-      i = is - 3
-      j = je + 3
-      call lagrange_poly_interp(veltemp, i, j, bd, dg, 'X-', istag, jstag, interporder)
-      call lagrange_poly_interp(veltempp, i, j, bd, dg, 'Y+', istag, jstag, interporder)
-      vel(i, j) = 0.5*(veltemp(i, j) + veltempp(i, j))
-
-      i = is - 2
-      j = je + 2
-      call lagrange_poly_interp(veltemp, i, j, bd, dg, 'X-', istag, jstag, interporder)
-      call lagrange_poly_interp(veltempp, i, j, bd, dg, 'Y+', istag, jstag, interporder)
-      vel(i, j) = 0.5*(veltemp(i, j) + veltempp(i, j))
-    end if
-
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    ! SE corner
-!     --------------
-!     |   1--2--3
-!     |   |     |
-!     |   4  5  6
-!     |   |     |
-!     |   7--8--9
-!
-    if (dg%rmp_se) then
-      call lagrange_poly_interp(vel, ie + 1, js - 2, bd, dg, 'X+', istag, jstag, interporder) !4
-      call lagrange_poly_interp(vel, ie + 1, js - 3, bd, dg, 'X+', istag, jstag, interporder) !7
-      call lagrange_poly_interp(vel, ie + 2, js - 3, bd, dg, 'X+', istag, jstag, interporder) !8
-      call lagrange_poly_interp(vel, ie + 2, js - 1, bd, dg, 'Y-', istag, jstag, interporder) !2
-      call lagrange_poly_interp(vel, ie + 3, js - 1, bd, dg, 'Y-', istag, jstag, interporder) !3
-      call lagrange_poly_interp(vel, ie + 3, js - 2, bd, dg, 'Y-', istag, jstag, interporder) !6
-
-      veltemp = vel
-      veltempp = vel
-
-      !diag
-      i = ie + 1
-      j = js - 1
-      call lagrange_poly_interp(veltemp, i, j, bd, dg, 'X+', istag, jstag, interporder)
-      call lagrange_poly_interp(veltempp, i, j, bd, dg, 'Y-', istag, jstag, interporder)
-      vel(i, j) = 0.5*(veltemp(i, j) + veltempp(i, j))
-      i = ie + 3
-      j = js - 3
-      call lagrange_poly_interp(veltemp, i, j, bd, dg, 'X+', istag, jstag, interporder)
-      call lagrange_poly_interp(veltempp, i, j, bd, dg, 'Y-', istag, jstag, interporder)
-      vel(i, j) = 0.5*(veltemp(i, j) + veltempp(i, j))
-      i = ie + 2
-      j = js - 2
-      call lagrange_poly_interp(veltemp, i, j, bd, dg, 'X+', istag, jstag, interporder)
-      call lagrange_poly_interp(veltempp, i, j, bd, dg, 'Y-', istag, jstag, interporder)
-      vel(i, j) = 0.5*(veltemp(i, j) + veltempp(i, j))
-    end if
-
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    ! SW corner
-!     -------------
-!        1--2--3  |
-!        |     |  |
-!        4  5  6  |
-!        |     |  |
-!        7--8--9  |
-!
-
-    if (dg%rmp_sw) then
-      call lagrange_poly_interp(vel, is - 1, js - 2, bd, dg, 'X-', istag, jstag, interporder) !6
-      call lagrange_poly_interp(vel, is - 1, js - 3, bd, dg, 'X-', istag, jstag, interporder) !9
-      call lagrange_poly_interp(vel, is - 2, js - 3, bd, dg, 'X-', istag, jstag, interporder) !8
-      call lagrange_poly_interp(vel, is - 2, js - 1, bd, dg, 'Y-', istag, jstag, interporder) !2
-      call lagrange_poly_interp(vel, is - 3, js - 1, bd, dg, 'Y-', istag, jstag, interporder) !1
-      call lagrange_poly_interp(vel, is - 3, js - 2, bd, dg, 'Y-', istag, jstag, interporder) !4
-
-      veltemp = vel
-      veltempp = vel
-
-      !diag
-      i = is - 1
-      j = js - 1
-      call lagrange_poly_interp(veltemp, i, j, bd, dg, 'X-', istag, jstag, interporder)
-      call lagrange_poly_interp(veltempp, i, j, bd, dg, 'Y-', istag, jstag, interporder)
-      vel(i, j) = 0.5*(veltemp(i, j) + veltempp(i, j))
-      i = is - 3
-      j = js - 3
-      call lagrange_poly_interp(veltemp, i, j, bd, dg, 'X-', istag, jstag, interporder)
-      call lagrange_poly_interp(veltempp, i, j, bd, dg, 'Y-', istag, jstag, interporder)
-      vel(i, j) = 0.5*(veltemp(i, j) + veltempp(i, j))
-      i = is - 2
-      j = js - 2
-      call lagrange_poly_interp(veltemp, i, j, bd, dg, 'X-', istag, jstag, interporder)
-      call lagrange_poly_interp(veltempp, i, j, bd, dg, 'Y-', istag, jstag, interporder)
-      vel(i, j) = 0.5*(veltemp(i, j) + veltempp(i, j))
-    end if
-
-  end subroutine fill_corner_region_2d
-
-  subroutine fill_corner_region_3d(vel, bd, dg, istag, jstag)
-    type(fv_grid_bounds_type), intent(IN) :: bd
-    type(duogrid_type), intent(in) :: dg
-    integer, intent(IN) :: istag, jstag
-    ! real, dimension(bd%isd:bd%ied + istag, bd%jsd:bd%jed + jstag) :: vel
-    real, dimension(bd%isd:, bd%jsd:, 1:) :: vel
-
-    integer :: i, j, is, ie, js, je, isd, ied, jsd, jed, npz, dims(3)
-    !integer :: interporder = 3 !order is interporder+1
-
-    real, allocatable, dimension(:, :, :) :: veltemp
-    real, allocatable, dimension(:, :, :) :: veltempp
-
-    dims = shape(vel)
-    npz = dims(3)
-
-! any other solutions to get the dimensions right?
-    allocate (veltemp(bd%isd:bd%ied + istag, bd%jsd:bd%jed + jstag, 1:npz))
-    allocate (veltempp(bd%isd:bd%ied + istag, bd%jsd:bd%jed + jstag, 1:npz))
-
-    is = bd%is
-    ie = bd%ie
-    js = bd%js
-    je = bd%je
-    isd = bd%isd
-    ied = bd%ied
-    jsd = bd%jsd
-    jed = bd%jed
-
-    !lastpoint in compute domain
-    ie = ie + istag
-    je = je + jstag
-
-    ! NE corner
-!     |   1--2--3
-!     |   |     |
-!     |   4  5  6
-!     |   |     |
-!     |   7--8--9
-!     -------------
-
-    if (dg%rmp_ne) then
-      call lagrange_poly_interp(vel, ie + 1, je + 2, bd, dg, 'X+', istag, jstag, interporder) !4
-      call lagrange_poly_interp(vel, ie + 1, je + 3, bd, dg, 'X+', istag, jstag, interporder) !1
-      call lagrange_poly_interp(vel, ie + 2, je + 3, bd, dg, 'X+', istag, jstag, interporder) !2
-      call lagrange_poly_interp(vel, ie + 2, je + 1, bd, dg, 'Y+', istag, jstag, interporder) !8
-      call lagrange_poly_interp(vel, ie + 3, je + 1, bd, dg, 'Y+', istag, jstag, interporder) !9
-      call lagrange_poly_interp(vel, ie + 3, je + 2, bd, dg, 'Y+', istag, jstag, interporder) !6
-
-      veltemp = vel
-      veltempp = vel
-
-      !diag
-      i = ie + 1
-      j = je + 1
-      call lagrange_poly_interp(veltemp, i, j, bd, dg, 'X+', istag, jstag, interporder)
-      call lagrange_poly_interp(veltempp, i, j, bd, dg, 'Y+', istag, jstag, interporder)
-      vel(i, j, :) = 0.5*(veltemp(i, j, :) + veltempp(i, j, :))
-
-      i = ie + 3
-      j = je + 3
-      call lagrange_poly_interp(veltemp, i, j, bd, dg, 'X+', istag, jstag, interporder)
-      call lagrange_poly_interp(veltempp, i, j, bd, dg, 'Y+', istag, jstag, interporder)
-      vel(i, j, :) = 0.5*(veltemp(i, j, :) + veltempp(i, j, :))
-
-      i = ie + 2
-      j = je + 2
-      call lagrange_poly_interp(veltemp, i, j, bd, dg, 'X+', istag, jstag, interporder)
-      call lagrange_poly_interp(veltempp, i, j, bd, dg, 'Y+', istag, jstag, interporder)
-      vel(i, j, :) = 0.5*(veltemp(i, j, :) + veltempp(i, j, :))
-    end if
-
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-    ! NW
-!        1--2--3 |
-!        |     | |
-!        4  5  6 |
-!        |     | |
-!        7--8--9 |
-!        ---------
-
-    if (dg%rmp_nw) then
-      call lagrange_poly_interp(vel, is - 1, je + 2, bd, dg, 'X-', istag, jstag, interporder) !6
-      call lagrange_poly_interp(vel, is - 1, je + 3, bd, dg, 'X-', istag, jstag, interporder) !3
-      call lagrange_poly_interp(vel, is - 2, je + 3, bd, dg, 'X-', istag, jstag, interporder) !2
-      call lagrange_poly_interp(vel, is - 2, je + 1, bd, dg, 'Y+', istag, jstag, interporder) !8
-      call lagrange_poly_interp(vel, is - 3, je + 1, bd, dg, 'Y+', istag, jstag, interporder) !7
-      call lagrange_poly_interp(vel, is - 3, je + 2, bd, dg, 'Y+', istag, jstag, interporder) !4
-
-      veltemp = vel
-      veltempp = vel
-
-      !diag
-      i = is - 1
-      j = je + 1
-      call lagrange_poly_interp(veltemp, i, j, bd, dg, 'X-', istag, jstag, interporder)
-      call lagrange_poly_interp(veltempp, i, j, bd, dg, 'Y+', istag, jstag, interporder)
-      vel(i, j, :) = 0.5*(veltemp(i, j, :) + veltempp(i, j, :))
-
-      i = is - 3
-      j = je + 3
-      call lagrange_poly_interp(veltemp, i, j, bd, dg, 'X-', istag, jstag, interporder)
-      call lagrange_poly_interp(veltempp, i, j, bd, dg, 'Y+', istag, jstag, interporder)
-      vel(i, j, :) = 0.5*(veltemp(i, j, :) + veltempp(i, j, :))
-
-      i = is - 2
-      j = je + 2
-      call lagrange_poly_interp(veltemp, i, j, bd, dg, 'X-', istag, jstag, interporder)
-      call lagrange_poly_interp(veltempp, i, j, bd, dg, 'Y+', istag, jstag, interporder)
-      vel(i, j, :) = 0.5*(veltemp(i, j, :) + veltempp(i, j, :))
-    end if
-
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    ! SE corner
-!     --------------
-!     |   1--2--3
-!     |   |     |
-!     |   4  5  6
-!     |   |     |
-!     |   7--8--9
-!
-    if (dg%rmp_se) then
-      call lagrange_poly_interp(vel, ie + 1, js - 2, bd, dg, 'X+', istag, jstag, interporder) !4
-      call lagrange_poly_interp(vel, ie + 1, js - 3, bd, dg, 'X+', istag, jstag, interporder) !7
-      call lagrange_poly_interp(vel, ie + 2, js - 3, bd, dg, 'X+', istag, jstag, interporder) !8
-      call lagrange_poly_interp(vel, ie + 2, js - 1, bd, dg, 'Y-', istag, jstag, interporder) !2
-      call lagrange_poly_interp(vel, ie + 3, js - 1, bd, dg, 'Y-', istag, jstag, interporder) !3
-      call lagrange_poly_interp(vel, ie + 3, js - 2, bd, dg, 'Y-', istag, jstag, interporder) !6
-
-      veltemp = vel
-      veltempp = vel
-
-      !diag
-      i = ie + 1
-      j = js - 1
-      call lagrange_poly_interp(veltemp, i, j, bd, dg, 'X+', istag, jstag, interporder)
-      call lagrange_poly_interp(veltempp, i, j, bd, dg, 'Y-', istag, jstag, interporder)
-      vel(i, j, :) = 0.5*(veltemp(i, j, :) + veltempp(i, j, :))
-      i = ie + 3
-      j = js - 3
-      call lagrange_poly_interp(veltemp, i, j, bd, dg, 'X+', istag, jstag, interporder)
-      call lagrange_poly_interp(veltempp, i, j, bd, dg, 'Y-', istag, jstag, interporder)
-      vel(i, j, :) = 0.5*(veltemp(i, j, :) + veltempp(i, j, :))
-      i = ie + 2
-      j = js - 2
-      call lagrange_poly_interp(veltemp, i, j, bd, dg, 'X+', istag, jstag, interporder)
-      call lagrange_poly_interp(veltempp, i, j, bd, dg, 'Y-', istag, jstag, interporder)
-      vel(i, j, :) = 0.5*(veltemp(i, j, :) + veltempp(i, j, :))
-    end if
-
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    ! SW corner
-!     -------------
-!        1--2--3  |
-!        |     |  |
-!        4  5  6  |
-!        |     |  |
-!        7--8--9  |
-!
-
-    if (dg%rmp_sw) then
-      call lagrange_poly_interp(vel, is - 1, js - 2, bd, dg, 'X-', istag, jstag, interporder) !6
-      call lagrange_poly_interp(vel, is - 1, js - 3, bd, dg, 'X-', istag, jstag, interporder) !9
-      call lagrange_poly_interp(vel, is - 2, js - 3, bd, dg, 'X-', istag, jstag, interporder) !8
-      call lagrange_poly_interp(vel, is - 2, js - 1, bd, dg, 'Y-', istag, jstag, interporder) !2
-      call lagrange_poly_interp(vel, is - 3, js - 1, bd, dg, 'Y-', istag, jstag, interporder) !1
-      call lagrange_poly_interp(vel, is - 3, js - 2, bd, dg, 'Y-', istag, jstag, interporder) !4
-
-      veltemp = vel
-      veltempp = vel
-
-      !diag
-      i = is - 1
-      j = js - 1
-      call lagrange_poly_interp(veltemp, i, j, bd, dg, 'X-', istag, jstag, interporder)
-      call lagrange_poly_interp(veltempp, i, j, bd, dg, 'Y-', istag, jstag, interporder)
-      vel(i, j, :) = 0.5*(veltemp(i, j, :) + veltempp(i, j, :))
-      i = is - 3
-      j = js - 3
-      call lagrange_poly_interp(veltemp, i, j, bd, dg, 'X-', istag, jstag, interporder)
-      call lagrange_poly_interp(veltempp, i, j, bd, dg, 'Y-', istag, jstag, interporder)
-      vel(i, j, :) = 0.5*(veltemp(i, j, :) + veltempp(i, j, :))
-      i = is - 2
-      j = js - 2
-      call lagrange_poly_interp(veltemp, i, j, bd, dg, 'X-', istag, jstag, interporder)
-      call lagrange_poly_interp(veltempp, i, j, bd, dg, 'Y-', istag, jstag, interporder)
-      vel(i, j, :) = 0.5*(veltemp(i, j, :) + veltempp(i, j, :))
-    end if
-
-    deallocate (veltemp, veltempp)
-  end subroutine fill_corner_region_3d
-
-!!!!!!!!!!
-!!slower!!
-!!!!!!!!!!
-!  subroutine fill_corner_region_3d(vel, bd, dg, istag, jstag)
-!    type(fv_grid_bounds_type), intent(IN) :: bd
-!    type(duogrid_type), intent(in) :: dg
-!    integer, intent(IN) :: istag, jstag
-!    real, dimension(bd%isd:, bd%jsd:, 1:) :: vel
-!
-!    integer :: k, npz, dims(3)
-!
-!    dims = shape(vel)
-!    npz = dims(3)
-!
-!    do k = 1, npz
-!      call fill_corner_region_2d(vel(:, :, k), bd, dg, istag, jstag)
-!    end do
-!  end subroutine fill_corner_region_3d
-
-  subroutine fill_corner_region_4d(vel, bd, dg, istag, jstag)
-    type(fv_grid_bounds_type), intent(IN) :: bd
-    type(duogrid_type), intent(in) :: dg
-    integer, intent(IN) :: istag, jstag
-    real, dimension(bd%isd:, bd%jsd:, 1:, 1:) :: vel
-
-    integer :: k, npz, q, nq, dims(4)
-
-    dims = shape(vel)
-    npz = dims(3)
-    nq = dims(4)
-
-    do q = 1, nq
-      call fill_corner_region_3d(vel(:, :, :, q), bd, dg, istag, jstag)
-    end do
-
-  end subroutine fill_corner_region_4d
 
 ! Below is the algorithm of the lagrangian interpolation function used to compute
 ! the cubed sphere corner region and the farthest haloe lines in cubed_a2d_halo and
@@ -2156,10 +2292,11 @@ contains
 
 ! compute coeff a priori
 ! TODO rearrange ss_store
-  subroutine compute_lagrange_coeff(xp, xm, yp, ym, bd, dg)
+  subroutine compute_lagrange_coeff(xp, xm, yp, ym, bd, dg, gg)
 
     type(fv_grid_bounds_type), intent(IN) :: bd
     type(duogrid_type), intent(inout) :: dg
+    type(global_grid_type), intent(in) :: gg
     real(kind=R_GRID), intent(out) :: xp(1:interporder + 1, bd%ie - interporder:bd%ied + 1, bd%jsd:bd%jed + 1, 4)
     real(kind=R_GRID), intent(out) :: xm(1:interporder + 1, bd%isd:bd%is + interporder, bd%jsd:bd%jed + 1, 4)
     real(kind=R_GRID), intent(out) :: yp(1:interporder + 1, bd%isd:bd%ied + 1, bd%je - interporder:bd%jed + 1, 4)
@@ -2168,16 +2305,29 @@ contains
     !local
     integer ii, iii, it, jstag, istag
     integer is, js, ie, je, i, j
-    real(kind=R_GRID) :: ss, S
+    integer isd, jsd, ied, jed
+    integer istagup, jstagup
+    real(kind=R_GRID) :: ss, dist1, dist2, S
 
-    do istag = 0, 1
-    do jstag = 0, 1
+    if (bd%isd == dg%bd%isd) then
+      istagup = 0
+      jstagup = 0
+      if (mpp_pe() == mpp_root_pe()) print *, "Generating interp coeff for ng4"
+    else
+      istagup = 1
+      jstagup = 1
+      if (mpp_pe() == mpp_root_pe()) print *, "Generating interp coeff for ng3"
+    end if
+    is = bd%is
+    js = bd%js
+    !xp(:,:,:,:)=-3232.
+    !do istag = 0, 1
+    !do jstag = 0, 1
+    do istag = 0, istagup
+    do jstag = 0, jstagup
     do i = bd%ie - interporder, bd%ied + istag
     do j = bd%jsd, bd%jed + jstag
-      is = bd%is
-      js = bd%js
-      !  ie = bd%ie + istag
-      !  je = bd%je + jstag
+
       do ii = bd%ie - interporder, bd%ie
         ss = 1.0
         do iii = bd%ie - interporder, bd%ie
@@ -2185,14 +2335,29 @@ contains
           if (ii > iii) it = 1
           if (ii .eq. iii) cycle
           if (j > bd%je - 1) then
-            ss = ss*it*(great_circle_dist(dg%a_pt(:, i - istag, j), dg%a_pt(:, iii, j))/ &
-                        great_circle_dist(dg%a_pt(:, ii, j), dg%a_pt(:, iii, j)))
+            dist1 = great_circle_dist(dg%a_pt(:, i - istag, j), dg%a_kik(:, iii, j))
+            dist2 = great_circle_dist(dg%a_kik(:, ii, j), dg%a_kik(:, iii, j))
+            if (great_circle_dist(dg%a_pt(:, i - istag, j), dg%a_kik(:, bd%ie - interporder, j))  <  great_circle_dist(dg%a_kik(:, iii, j), dg%a_kik(:, bd%ie - interporder, j)) ) dist1=dist1*(-1)
+            if (great_circle_dist(dg%a_kik(:, ii, j), dg%a_kik(:, bd%ie - interporder, j))        <  great_circle_dist(dg%a_kik(:, iii, j), dg%a_kik(:, bd%ie - interporder, j)) ) dist2=dist2*(-1)
+            ss = ss*dist1/dist2
           else
-            ss = ss*it*(great_circle_dist(dg%a_pt(:, i - istag, j - jstag), dg%a_pt(:, iii, j - jstag))/ &
-                        great_circle_dist(dg%a_pt(:, ii, j - jstag), dg%a_pt(:, iii, j - jstag)))
+
+            dist1 = great_circle_dist(dg%a_pt(:, i - istag, j - jstag), dg%a_kik(:, iii, j - jstag))
+            dist2 = great_circle_dist(dg%a_kik(:, ii, j - jstag), dg%a_kik(:, iii, j - jstag))
+            if (great_circle_dist(dg%a_pt(:, i - istag, j-jstag), dg%a_kik(:, bd%ie - interporder, j-jstag))  <  great_circle_dist(dg%a_kik(:, iii, j-jstag), dg%a_kik(:, bd%ie - interporder, j-jstag)) ) dist1=dist1*(-1)
+            if (great_circle_dist(dg%a_kik(:, ii, j-jstag), dg%a_kik(:, bd%ie - interporder, j-jstag))        <  great_circle_dist(dg%a_kik(:, iii, j-jstag), dg%a_kik(:, bd%ie - interporder, j-jstag)) ) dist2=dist2*(-1)
+!if (mpp_pe()==0) print*, i,j, ii,iii,dist1,dist2
+            ss = ss*dist1/dist2
+
+            ! ss = ss*it*(great_circle_dist(dg%a_pt(:, i - istag, j - jstag), dg%a_pt(:, iii, j - jstag))/ &
+            !             great_circle_dist(dg%a_pt(:, ii, j - jstag), dg%a_pt(:, iii, j - jstag)))
+            !ss = ss*it*(great_circle_dist(dg%a_pt(:, i - istag, j - jstag), dg%a_kik(:, iii, j - jstag))/ &
+            !            (great_circle_dist(dg%a_kik(:, ii, j - jstag), dg%a_kik(:, iii, j - jstag))+0.000000001))
           end if
         end do
-        xp(bd%ie - ii + 1, i, j, 2*istag + jstag + 1) = ss
+!write(1200+mpp_pe(),*) istag, jstag, i, j, ii, ss
+        !xp(bd%ie - ii + 1, i, j, 2*istag + jstag + 1) = ss
+        xp(ii - bd%ie + interporder + 1, i, j, 2*istag + jstag + 1) = ss
       end do
 
     end do
@@ -2208,11 +2373,27 @@ contains
           if (ii > iii) it = -1
           if (ii .eq. iii) cycle
           if (j > bd%je - 1) then
-            ss = ss*it*(great_circle_dist(dg%a_pt(:, i, j), dg%a_pt(:, iii, j))/ &
-                        great_circle_dist(dg%a_pt(:, ii, j), dg%a_pt(:, iii, j)))
+
+            dist1 = great_circle_dist(dg%a_pt(:, i, j), dg%a_kik(:, iii, j))
+            dist2 = great_circle_dist(dg%a_kik(:, ii, j), dg%a_kik(:, iii, j))
+            if (great_circle_dist(dg%a_pt(:, i , j), dg%a_kik(:, bd%is + interporder, j))  <  great_circle_dist(dg%a_kik(:, iii, j), dg%a_kik(:, bd%is + interporder, j)) ) dist1=dist1*(-1)
+            if (great_circle_dist(dg%a_kik(:, ii, j), dg%a_kik(:, bd%is + interporder, j))        <  great_circle_dist(dg%a_kik(:, iii, j), dg%a_kik(:, bd%is + interporder, j)) ) dist2=dist2*(-1)
+            ss = ss*dist1/dist2
+
+            !  ss = ss*it*(great_circle_dist(dg%a_pt(:, i, j), dg%a_pt(:, iii, j))/ &
+            !              great_circle_dist(dg%a_pt(:, ii, j), dg%a_pt(:, iii, j)))
           else
-            ss = ss*it*(great_circle_dist(dg%a_pt(:, i, j - jstag), dg%a_pt(:, iii, j - jstag))/ &
-                        great_circle_dist(dg%a_pt(:, ii, j - jstag), dg%a_pt(:, iii, j - jstag)))
+
+            dist1 = great_circle_dist(dg%a_pt(:, i, j - jstag), dg%a_kik(:, iii, j - jstag))
+            dist2 = great_circle_dist(dg%a_kik(:, ii, j - jstag), dg%a_kik(:, iii, j - jstag))
+            if (great_circle_dist(dg%a_pt(:, i , j-jstag), dg%a_kik(:, bd%is + interporder, j-jstag))  <  great_circle_dist(dg%a_kik(:, iii, j-jstag), dg%a_kik(:, bd%is + interporder, j-jstag)) ) dist1=dist1*(-1)
+            if (great_circle_dist(dg%a_kik(:, ii, j-jstag), dg%a_kik(:, bd%is + interporder, j-jstag))        <  great_circle_dist(dg%a_kik(:, iii, j-jstag), dg%a_kik(:, bd%is + interporder, j-jstag)) ) dist2=dist2*(-1)
+            ss = ss*dist1/dist2
+
+            !  ss = ss*it*(great_circle_dist(dg%a_pt(:, i, j - jstag), dg%a_pt(:, iii, j - jstag))/ &
+            !              great_circle_dist(dg%a_pt(:, ii, j - jstag), dg%a_pt(:, iii, j - jstag)))
+            !ss = ss*it*(great_circle_dist(dg%a_pt(:, i, j - jstag), dg%a_kik(:, iii, j - jstag))/ &
+            !            (great_circle_dist(dg%a_kik(:, ii, j - jstag), dg%a_kik(:, iii, j - jstag))+0.000001))
           end if
 
         end do
@@ -2230,16 +2411,35 @@ contains
           if (ii > iii) it = 1
           if (ii .eq. iii) cycle
           if (i > bd%ie - 1) then
-            ss = ss*it*(great_circle_dist(dg%a_pt(:, i, j - jstag), dg%a_pt(:, i, iii))/ &
-                        great_circle_dist(dg%a_pt(:, i, ii), dg%a_pt(:, i, iii)))
+
+            dist1 = great_circle_dist(dg%a_pt(:, i, j - jstag), dg%a_kik(:, i, iii))
+            dist2 = great_circle_dist(dg%a_kik(:, i, ii), dg%a_kik(:, i, iii))
+            if (great_circle_dist(dg%a_pt(:, i , j-jstag), dg%a_kik(:, i, bd%je - interporder))  <  great_circle_dist(dg%a_kik(:, i, iii), dg%a_kik(:, i, bd%je - interporder)) ) dist1=dist1*(-1)
+            if (great_circle_dist(dg%a_kik(:, i, ii), dg%a_kik(:, i, bd%je - interporder))        <  great_circle_dist(dg%a_kik(:, i, iii), dg%a_kik(:, i, bd%je - interporder)) ) dist2=dist2*(-1)
+            ss = ss*dist1/dist2
+
+            ! ss = ss*it*(great_circle_dist(dg%a_pt(:, i, j - jstag), dg%a_pt(:, i, iii))/ &
+            !              great_circle_dist(dg%a_pt(:, i, ii), dg%a_pt(:, i, iii)))
+            !ss = ss*it*(great_circle_dist(dg%a_pt(:, i, j - jstag), dg%a_kik(:, i, iii))/ &
+            !            (great_circle_dist(dg%a_kik(:, i, ii), dg%a_kik(:, i, iii))+0.000001))
           else
-            ss = ss*it*(great_circle_dist(dg%a_pt(:, i - istag, j - jstag), dg%a_pt(:, i - istag, iii))/ &
-                        great_circle_dist(dg%a_pt(:, i - istag, ii), dg%a_pt(:, i - istag, iii)))
+
+            dist1 = great_circle_dist(dg%a_pt(:, i - istag, j - jstag), dg%a_kik(:, i - istag, iii))
+            dist2 = great_circle_dist(dg%a_kik(:, i - istag, ii), dg%a_kik(:, i - istag, iii))
+            if (great_circle_dist(dg%a_pt(:, i -istag, j-jstag), dg%a_kik(:, i-istag, bd%je - interporder))  <  great_circle_dist(dg%a_kik(:, i-istag, iii), dg%a_kik(:, i-istag, bd%je - interporder)) ) dist1=dist1*(-1)
+            if (great_circle_dist(dg%a_kik(:, i-istag, ii), dg%a_kik(:, i-istag, bd%je - interporder))        <  great_circle_dist(dg%a_kik(:, i-istag, iii), dg%a_kik(:, i-istag, bd%je - interporder)) ) dist2=dist2*(-1)
+            ss = ss*dist1/dist2
+
+            !ss = ss*it*(great_circle_dist(dg%a_pt(:, i - istag, j - jstag), dg%a_pt(:, i - istag, iii))/ &
+            !            great_circle_dist(dg%a_pt(:, i - istag, ii), dg%a_pt(:, i - istag, iii)))
+            !ss = ss*it*(great_circle_dist(dg%a_pt(:, i - istag, j - jstag), dg%a_kik(:, i - istag, iii))/ &
+            !            (great_circle_dist(dg%a_kik(:, i - istag, ii), dg%a_kik(:, i - istag, iii))+0.000001))
 
           end if
 
         end do
-        yp(bd%je - ii + 1, i, j, 2*istag + jstag + 1) = ss
+        !yp(bd%je - ii + 1, i, j, 2*istag + jstag + 1) = ss
+        yp(ii - bd%je + interporder + 1, i, j, 2*istag + jstag + 1) = ss
       end do
     end do
     end do
@@ -2253,11 +2453,29 @@ contains
           if (ii > iii) it = -1
           if (ii .eq. iii) cycle
           if (i > bd%ie - 1) then
-            ss = ss*it*(great_circle_dist(dg%a_pt(:, i, j), dg%a_pt(:, i, iii))/ &
-                        great_circle_dist(dg%a_pt(:, i, ii), dg%a_pt(:, i, iii)))
+
+            dist1 = great_circle_dist(dg%a_pt(:, i, j), dg%a_kik(:, i, iii))
+            dist2 = great_circle_dist(dg%a_kik(:, i, ii), dg%a_kik(:, i, iii))
+            if (great_circle_dist(dg%a_pt(:, i , j), dg%a_kik(:, i, bd%js + interporder))  <  great_circle_dist(dg%a_kik(:, i, iii), dg%a_kik(:, i, bd%js + interporder)) ) dist1=dist1*(-1)
+            if (great_circle_dist(dg%a_kik(:, i, ii), dg%a_kik(:, i, bd%js + interporder))        <  great_circle_dist(dg%a_kik(:, i, iii), dg%a_kik(:, i, bd%js + interporder)) ) dist2=dist2*(-1)
+            ss = ss*dist1/dist2
+
+!            ss = ss*it*(great_circle_dist(dg%a_pt(:, i, j), dg%a_pt(:, i, iii))/ &
+!                        great_circle_dist(dg%a_pt(:, i, ii), dg%a_pt(:, i, iii)))
+            !ss = ss*it*(great_circle_dist(dg%a_pt(:, i, j), dg%a_kik(:, i, iii))/ &
+            !            (great_circle_dist(dg%a_kik(:, i, ii), dg%a_kik(:, i, iii))+0.000001))
           else
-            ss = ss*it*(great_circle_dist(dg%a_pt(:, i - istag, j), dg%a_pt(:, i - istag, iii))/ &
-                        great_circle_dist(dg%a_pt(:, i - istag, ii), dg%a_pt(:, i - istag, iii)))
+
+            dist1 = great_circle_dist(dg%a_pt(:, i - istag, j), dg%a_kik(:, i - istag, iii))
+            dist2 = great_circle_dist(dg%a_kik(:, i - istag, ii), dg%a_kik(:, i - istag, iii))
+            if (great_circle_dist(dg%a_pt(:, i -istag, j), dg%a_kik(:, i-istag, bd%js + interporder))  <  great_circle_dist(dg%a_kik(:, i-istag, iii), dg%a_kik(:, i-istag, bd%js + interporder)) ) dist1=dist1*(-1)
+            if (great_circle_dist(dg%a_kik(:, i-istag, ii), dg%a_kik(:, i-istag, bd%js + interporder))        <  great_circle_dist(dg%a_kik(:, i-istag, iii), dg%a_kik(:, i-istag, bd%js + interporder)) ) dist2=dist2*(-1)
+            ss = ss*dist1/dist2
+
+!            ss = ss*it*(great_circle_dist(dg%a_pt(:, i - istag, j), dg%a_pt(:, i - istag, iii))/ &
+!                        great_circle_dist(dg%a_pt(:, i - istag, ii), dg%a_pt(:, i - istag, iii)))
+            !ss = ss*it*(great_circle_dist(dg%a_pt(:, i - istag, j), dg%a_kik(:, i - istag, iii))/ &
+            !            (great_circle_dist(dg%a_kik(:, i - istag, ii), dg%a_kik(:, i - istag, iii))+0.000001))
           end if
 
         end do
@@ -2271,113 +2489,284 @@ contains
     if (mpp_pe() == mpp_root_pe()) print *, "DUO lag coeff: DONE!"
   end subroutine compute_lagrange_coeff
 
-!  subroutine compute_lagrange_poly_interp_2d(ss_store, i, j, bd, dg, direction, istag, jstag, order, corner)
-!
-!    integer, intent(in) :: i, j, istag, jstag, order
-!    type(fv_grid_bounds_type), intent(IN) :: bd
-!    !real, dimension(bd%isd:, bd%jsd:) :: field
-!    type(duogrid_type), intent(in) :: dg
-!    character(len=*), intent(in) :: direction
-!    logical, optional, intent(in) :: corner
-!    real(kind=R_GRID), intent(out) :: ss_store(5, 1:interporder+1, bd%isd:bd%ied+1, bd%jsd:bd%jed+1, 0:1,0:1)
-!
-!    !local
-!    integer ii, iii, it
-!    integer is, js, ie, je
-!    real(kind=R_GRID) :: ss, S
-!
-!    is = bd%is
-!    js = bd%js
-!    ie = bd%ie + istag
-!    je = bd%je + jstag
-!    it = 1
-!
-!!TO check: compute weight coefficients a priori?!
-!
-!        do ii = bd%ie - interporder, bd%ie
-!          ss = 1.0
-!          do iii = bd%ie - interporder, bd%ie
-!            if (ii < iii) it = -1
-!            if (ii > iii) it = 1
-!            if (ii .eq. iii) cycle
-!            if (j > bd%je - 1) then
-!              ss = ss*it*(great_circle_dist(dg%a_pt(:, i - istag, j), dg%a_pt(:, iii, j))/great_circle_dist(dg%a_pt(:, ii, j), &
-!                                                                                                            dg%a_pt(:, iii, j)))
-!            else
-!            ss = ss*it*(great_circle_dist(dg%a_pt(:, i-istag, j-jstag), dg%a_pt(:, iii, j-jstag))/great_circle_dist(dg%a_pt(:, ii, j-jstag),   dg%a_pt(:, iii, j-jstag)))
-!            end if
-!          end do
-!          ss_store(1,bd%ie-ii+1,i,j,istag,jstag)=ss
-!        end do
-!
-!
-!        do ii = is + order, is, -1
-!          ss = 1.0
-!          do iii = is + order, is, -1
-!            if (ii < iii) it = 1
-!            if (ii > iii) it = -1
-!            if (ii .eq. iii) cycle
-!            if (j > bd%je - 1) then
-!              ss = ss*it*(great_circle_dist(dg%a_pt(:, i, j), dg%a_pt(:, iii, j))/great_circle_dist(dg%a_pt(:, ii, j), &
-!                                                                                                    dg%a_pt(:, iii, j)))
-!            else
-!              ss = ss*it*(great_circle_dist(dg%a_pt(:, i, j - jstag), dg%a_pt(:, iii, j - jstag))/great_circle_dist(dg%a_pt(:, ii, j - jstag), &
-!                                                                                                        dg%a_pt(:, iii, j - jstag)))
-!            end if
-!          end do
-!          ss_store(2,is+order-ii+1,i,j,istag,jstag)=ss
-!        end do
-!
-!
-!        do ii = bd%je - order, bd%je
-!          ss = 1.0
-!          do iii = bd%je - order, bd%je
-!            if (ii < iii) it = -1
-!            if (ii > iii) it = 1
-!            if (ii .eq. iii) cycle
-!            if (i > bd%ie - 1) then
-!              ss = ss*it*(great_circle_dist(dg%a_pt(:, i, j - jstag), dg%a_pt(:, i, iii))/great_circle_dist(dg%a_pt(:, i, ii), &
-!                                                                                                            dg%a_pt(:, i, iii)))
-!            else
-!              ss = ss*it*(great_circle_dist(dg%a_pt(:, i-istag, j-jstag), dg%a_pt(:, i-istag, iii))/great_circle_dist(dg%a_pt(:, i-istag, ii), &
-!                                                                                                        dg%a_pt(:, i - istag, iii)))
-!
-!            end if
-!          end do
-!          ss_store(3,bd%je-ii+1,i,j,istag,jstag)=ss
-!        end do
-!
-!        do ii = js + order, js, -1
-!          ss = 1.0
-!          do iii = js + order, js, -1
-!            if (ii < iii) it = 1
-!            if (ii > iii) it = -1
-!            if (ii .eq. iii) cycle
-!            if (i > bd%ie - 1) then
-!              ss = ss*it*(great_circle_dist(dg%a_pt(:, i, j), dg%a_pt(:, i, iii))/great_circle_dist(dg%a_pt(:, i, ii), &
-!                                                                                                    dg%a_pt(:, i, iii)))
-!            else
-!              ss = ss*it*(great_circle_dist(dg%a_pt(:, i - istag, j), dg%a_pt(:, i - istag, iii))/great_circle_dist(dg%a_pt(:, i - istag, ii), &
-!                                                                                                        dg%a_pt(:, i - istag, iii)))
-!            end if
-!          end do
-!          ss_store(4,js+order-ii+1,i,j,istag,jstag)=ss
-!        end do
-!
-!  end subroutine compute_lagrange_poly_interp_2d
+  subroutine compute_lagrange_coeff_extra(xp, xm, yp, ym, bd, dg, gg)
 
-  subroutine lagrange_poly_interp_2d(field, i, j, bd, dg, direction, istag, jstag, order, corner)
-
-    integer, intent(in) :: i, j, istag, jstag, order
     type(fv_grid_bounds_type), intent(IN) :: bd
-    real, dimension(bd%isd:, bd%jsd:) :: field
+    type(duogrid_type), intent(inout) :: dg
+    type(global_grid_type), intent(in) :: gg
+    real(kind=R_GRID), intent(out) :: xp(1:interporder + 1, bd%ie - interporder:bd%ied + 1, bd%jsd:bd%jed + 1, 4)
+    real(kind=R_GRID), intent(out) :: xm(1:interporder + 1, bd%isd:bd%is + interporder, bd%jsd:bd%jed + 1, 4)
+    real(kind=R_GRID), intent(out) :: yp(1:interporder + 1, bd%isd:bd%ied + 1, bd%je - interporder:bd%jed + 1, 4)
+    real(kind=R_GRID), intent(out) :: ym(1:interporder + 1, bd%isd:bd%ied + 1, bd%jsd:bd%js + interporder, 4)
+
+    !local
+    integer ii, iii, it, jstag, istag
+    integer is, js, ie, je, i, j
+    integer isd, jsd, ied, jed
+    integer istagup, jstagup
+    real(kind=R_GRID) :: ss, dist1, dist2, S
+
+    if (bd%isd == dg%bd%isd) then
+      istagup = 0
+      jstagup = 0
+      if (mpp_pe() == mpp_root_pe()) print *, "Generating interp coeff for ng4"
+    else
+      istagup = 1
+      jstagup = 1
+      if (mpp_pe() == mpp_root_pe()) print *, "Generating interp coeff for ng3"
+    end if
+    is = bd%is
+    js = bd%js
+    !xp(:,:,:,:)=-3232.
+    !do istag = 0, 1
+    !do jstag = 0, 1
+    do istag = 0, istagup
+    do jstag = 0, jstagup
+    do i = bd%ie - interporder, bd%ied + istag
+    do j = bd%jsd, bd%jed + jstag
+
+      do ii = bd%ie - interporder, bd%ie
+        ss = 1.0
+        do iii = bd%ie - interporder, bd%ie
+          if (ii < iii) it = -1
+          if (ii > iii) it = 1
+          if (ii .eq. iii) cycle
+          if (j > bd%je - 1) then
+            dist1 = great_circle_dist(dg%a_pt(:, i - istag, j), dg%a_pt(:, iii, j))
+            dist2 = great_circle_dist(dg%a_pt(:, ii, j), dg%a_pt(:, iii, j))
+            if (great_circle_dist(dg%a_pt(:, i - istag, j), dg%a_pt(:, bd%ie - interporder, j))  <  great_circle_dist(dg%a_pt(:, iii, j), dg%a_pt(:, bd%ie - interporder, j)) ) dist1=dist1*(-1)
+            if (great_circle_dist(dg%a_pt(:, ii, j), dg%a_pt(:, bd%ie - interporder, j))        <  great_circle_dist(dg%a_pt(:, iii, j), dg%a_pt(:, bd%ie - interporder, j)) ) dist2=dist2*(-1)
+            ss = ss*dist1/dist2
+          else
+
+            dist1 = great_circle_dist(dg%a_pt(:, i - istag, j - jstag), dg%a_pt(:, iii, j - jstag))
+            dist2 = great_circle_dist(dg%a_pt(:, ii, j - jstag), dg%a_pt(:, iii, j - jstag))
+            if (great_circle_dist(dg%a_pt(:, i - istag, j-jstag), dg%a_pt(:, bd%ie - interporder, j-jstag))  <  great_circle_dist(dg%a_pt(:, iii, j-jstag), dg%a_pt(:, bd%ie - interporder, j-jstag)) ) dist1=dist1*(-1)
+            if (great_circle_dist(dg%a_pt(:, ii, j-jstag), dg%a_pt(:, bd%ie - interporder, j-jstag))        <  great_circle_dist(dg%a_pt(:, iii, j-jstag), dg%a_pt(:, bd%ie - interporder, j-jstag)) ) dist2=dist2*(-1)
+!if (mpp_pe()==0) print*, i,j, ii,iii,dist1,dist2
+            ss = ss*dist1/dist2
+
+            ! ss = ss*it*(great_circle_dist(dg%a_pt(:, i - istag, j - jstag), dg%a_pt(:, iii, j - jstag))/ &
+            !             great_circle_dist(dg%a_pt(:, ii, j - jstag), dg%a_pt(:, iii, j - jstag)))
+            !ss = ss*it*(great_circle_dist(dg%a_pt(:, i - istag, j - jstag), dg%a_kik(:, iii, j - jstag))/ &
+            !            (great_circle_dist(dg%a_kik(:, ii, j - jstag), dg%a_kik(:, iii, j - jstag))+0.000000001))
+          end if
+        end do
+!write(1200+mpp_pe(),*) istag, jstag, i, j, ii, ss
+        !xp(bd%ie - ii + 1, i, j, 2*istag + jstag + 1) = ss
+        xp(ii - bd%ie + interporder + 1, i, j, 2*istag + jstag + 1) = ss
+      end do
+
+    end do
+    end do
+
+    do i = bd%isd, bd%is + interporder
+    do j = bd%jsd, bd%jed + jstag
+
+      do ii = is + interporder, is, -1
+        ss = 1.0
+        do iii = is + interporder, is, -1
+          if (ii < iii) it = 1
+          if (ii > iii) it = -1
+          if (ii .eq. iii) cycle
+          if (j > bd%je - 1) then
+
+            dist1 = great_circle_dist(dg%a_pt(:, i, j), dg%a_pt(:, iii, j))
+            dist2 = great_circle_dist(dg%a_pt(:, ii, j), dg%a_pt(:, iii, j))
+            if (great_circle_dist(dg%a_pt(:, i , j), dg%a_pt(:, bd%is + interporder, j))  <  great_circle_dist(dg%a_pt(:, iii, j), dg%a_pt(:, bd%is + interporder, j)) ) dist1=dist1*(-1)
+            if (great_circle_dist(dg%a_pt(:, ii, j), dg%a_pt(:, bd%is + interporder, j))        <  great_circle_dist(dg%a_pt(:, iii, j), dg%a_pt(:, bd%is + interporder, j)) ) dist2=dist2*(-1)
+            ss = ss*dist1/dist2
+
+            !  ss = ss*it*(great_circle_dist(dg%a_pt(:, i, j), dg%a_pt(:, iii, j))/ &
+            !              great_circle_dist(dg%a_pt(:, ii, j), dg%a_pt(:, iii, j)))
+          else
+
+            dist1 = great_circle_dist(dg%a_pt(:, i, j - jstag), dg%a_pt(:, iii, j - jstag))
+            dist2 = great_circle_dist(dg%a_pt(:, ii, j - jstag), dg%a_pt(:, iii, j - jstag))
+            if (great_circle_dist(dg%a_pt(:, i , j-jstag), dg%a_pt(:, bd%is + interporder, j-jstag))  <  great_circle_dist(dg%a_pt(:, iii, j-jstag), dg%a_pt(:, bd%is + interporder, j-jstag)) ) dist1=dist1*(-1)
+            if (great_circle_dist(dg%a_pt(:, ii, j-jstag), dg%a_pt(:, bd%is + interporder, j-jstag))        <  great_circle_dist(dg%a_pt(:, iii, j-jstag), dg%a_pt(:, bd%is + interporder, j-jstag)) ) dist2=dist2*(-1)
+            ss = ss*dist1/dist2
+
+            !  ss = ss*it*(great_circle_dist(dg%a_pt(:, i, j - jstag), dg%a_pt(:, iii, j - jstag))/ &
+            !              great_circle_dist(dg%a_pt(:, ii, j - jstag), dg%a_pt(:, iii, j - jstag)))
+            !ss = ss*it*(great_circle_dist(dg%a_pt(:, i, j - jstag), dg%a_kik(:, iii, j - jstag))/ &
+            !            (great_circle_dist(dg%a_kik(:, ii, j - jstag), dg%a_kik(:, iii, j - jstag))+0.000001))
+          end if
+
+        end do
+        xm(is + interporder - ii + 1, i, j, 2*istag + jstag + 1) = ss
+      end do
+    end do
+    end do
+
+    do i = bd%isd, bd%ied + istag
+    do j = bd%je - interporder, bd%jed + jstag
+      do ii = bd%je - interporder, bd%je
+        ss = 1.0
+        do iii = bd%je - interporder, bd%je
+          if (ii < iii) it = -1
+          if (ii > iii) it = 1
+          if (ii .eq. iii) cycle
+          if (i > bd%ie - 1) then
+
+            dist1 = great_circle_dist(dg%a_pt(:, i, j - jstag), dg%a_pt(:, i, iii))
+            dist2 = great_circle_dist(dg%a_pt(:, i, ii), dg%a_pt(:, i, iii))
+            if (great_circle_dist(dg%a_pt(:, i , j-jstag), dg%a_pt(:, i, bd%je - interporder))  <  great_circle_dist(dg%a_pt(:, i, iii), dg%a_pt(:, i, bd%je - interporder)) ) dist1=dist1*(-1)
+            if (great_circle_dist(dg%a_pt(:, i, ii), dg%a_pt(:, i, bd%je - interporder))        <  great_circle_dist(dg%a_pt(:, i, iii), dg%a_pt(:, i, bd%je - interporder)) ) dist2=dist2*(-1)
+            ss = ss*dist1/dist2
+
+            ! ss = ss*it*(great_circle_dist(dg%a_pt(:, i, j - jstag), dg%a_pt(:, i, iii))/ &
+            !              great_circle_dist(dg%a_pt(:, i, ii), dg%a_pt(:, i, iii)))
+            !ss = ss*it*(great_circle_dist(dg%a_pt(:, i, j - jstag), dg%a_kik(:, i, iii))/ &
+            !            (great_circle_dist(dg%a_kik(:, i, ii), dg%a_kik(:, i, iii))+0.000001))
+          else
+
+            dist1 = great_circle_dist(dg%a_pt(:, i - istag, j - jstag), dg%a_pt(:, i - istag, iii))
+            dist2 = great_circle_dist(dg%a_pt(:, i - istag, ii), dg%a_pt(:, i - istag, iii))
+            if (great_circle_dist(dg%a_pt(:, i -istag, j-jstag), dg%a_pt(:, i-istag, bd%je - interporder))  <  great_circle_dist(dg%a_pt(:, i-istag, iii), dg%a_pt(:, i-istag, bd%je - interporder)) ) dist1=dist1*(-1)
+            if (great_circle_dist(dg%a_pt(:, i-istag, ii), dg%a_pt(:, i-istag, bd%je - interporder))        <  great_circle_dist(dg%a_pt(:, i-istag, iii), dg%a_pt(:, i-istag, bd%je - interporder)) ) dist2=dist2*(-1)
+            ss = ss*dist1/dist2
+
+            !ss = ss*it*(great_circle_dist(dg%a_pt(:, i - istag, j - jstag), dg%a_pt(:, i - istag, iii))/ &
+            !            great_circle_dist(dg%a_pt(:, i - istag, ii), dg%a_pt(:, i - istag, iii)))
+            !ss = ss*it*(great_circle_dist(dg%a_pt(:, i - istag, j - jstag), dg%a_kik(:, i - istag, iii))/ &
+            !            (great_circle_dist(dg%a_kik(:, i - istag, ii), dg%a_kik(:, i - istag, iii))+0.000001))
+
+          end if
+
+        end do
+        !yp(bd%je - ii + 1, i, j, 2*istag + jstag + 1) = ss
+        yp(ii - bd%je + interporder + 1, i, j, 2*istag + jstag + 1) = ss
+      end do
+    end do
+    end do
+
+    do i = bd%isd, bd%ied + istag
+    do j = bd%jsd, bd%js + interporder
+      do ii = js + interporder, js, -1
+        ss = 1.0
+        do iii = js + interporder, js, -1
+          if (ii < iii) it = 1
+          if (ii > iii) it = -1
+          if (ii .eq. iii) cycle
+          if (i > bd%ie - 1) then
+
+            dist1 = great_circle_dist(dg%a_pt(:, i, j), dg%a_pt(:, i, iii))
+            dist2 = great_circle_dist(dg%a_pt(:, i, ii), dg%a_pt(:, i, iii))
+            if (great_circle_dist(dg%a_pt(:, i , j), dg%a_pt(:, i, bd%js + interporder))  <  great_circle_dist(dg%a_pt(:, i, iii), dg%a_pt(:, i, bd%js + interporder)) ) dist1=dist1*(-1)
+            if (great_circle_dist(dg%a_pt(:, i, ii), dg%a_pt(:, i, bd%js + interporder))        <  great_circle_dist(dg%a_pt(:, i, iii), dg%a_pt(:, i, bd%js + interporder)) ) dist2=dist2*(-1)
+            ss = ss*dist1/dist2
+
+!            ss = ss*it*(great_circle_dist(dg%a_pt(:, i, j), dg%a_pt(:, i, iii))/ &
+!                        great_circle_dist(dg%a_pt(:, i, ii), dg%a_pt(:, i, iii)))
+            !ss = ss*it*(great_circle_dist(dg%a_pt(:, i, j), dg%a_kik(:, i, iii))/ &
+            !            (great_circle_dist(dg%a_kik(:, i, ii), dg%a_kik(:, i, iii))+0.000001))
+          else
+
+            dist1 = great_circle_dist(dg%a_pt(:, i - istag, j), dg%a_pt(:, i - istag, iii))
+            dist2 = great_circle_dist(dg%a_pt(:, i - istag, ii), dg%a_pt(:, i - istag, iii))
+            if (great_circle_dist(dg%a_pt(:, i -istag, j), dg%a_pt(:, i-istag, bd%js + interporder))  <  great_circle_dist(dg%a_pt(:, i-istag, iii), dg%a_pt(:, i-istag, bd%js + interporder)) ) dist1=dist1*(-1)
+            if (great_circle_dist(dg%a_pt(:, i-istag, ii), dg%a_pt(:, i-istag, bd%js + interporder))        <  great_circle_dist(dg%a_pt(:, i-istag, iii), dg%a_pt(:, i-istag, bd%js + interporder)) ) dist2=dist2*(-1)
+            ss = ss*dist1/dist2
+
+!            ss = ss*it*(great_circle_dist(dg%a_pt(:, i - istag, j), dg%a_pt(:, i - istag, iii))/ &
+!                        great_circle_dist(dg%a_pt(:, i - istag, ii), dg%a_pt(:, i - istag, iii)))
+            !ss = ss*it*(great_circle_dist(dg%a_pt(:, i - istag, j), dg%a_kik(:, i - istag, iii))/ &
+            !            (great_circle_dist(dg%a_kik(:, i - istag, ii), dg%a_kik(:, i - istag, iii))+0.000001))
+          end if
+
+        end do
+        ym(js + interporder - ii + 1, i, j, 2*istag + jstag + 1) = ss
+      end do
+    end do
+    end do
+    end do
+    end do
+
+    if (mpp_pe() == mpp_root_pe()) print *, "DUO lag coeff: DONE!"
+  end subroutine compute_lagrange_coeff_extra
+
+
+
+  subroutine lagrange_poly_buff_fast(field, loc, arr, istag, jstag, order, ilbound, upperbound)
+
+    integer, intent(in) :: loc, istag, jstag, order, ilbound, upperbound
+    real, dimension(ilbound:) :: field
+    real, dimension(1:) :: arr
+
+    !local
+    integer ii
+    real(kind=R_GRID) :: S
+
+    call timing_on('lagbuff')
+
+    S = 0. ! here we sum all the polynomial*solution
+
+!OK with field 2D
+!!!!!!!!!!!!!!!!      do ii = ie-order,ie
+!!!!!!!!!!!!!!!!        !S = S + xp(ii - ie + order + 1, i, j, 2*istag + jstag + 1)*field(ii + istag, j)
+!!!!!!!!!!!!!!!!        S = S + arr(ii - ie + order + 1)*field(ii + istag, j)
+!!!!!!!!!!!!!!!!      end do
+!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!      field(i, j) = S
+
+     do ii = upperbound-order,upperbound
+       S = S + arr(ii - upperbound + order + 1)*field(ii + istag)
+     end do
+
+     field(loc) = S
+
+    call timing_off('lagbuff')
+  end subroutine lagrange_poly_buff_fast
+
+
+
+  subroutine lagrange_poly_buff_fast_minus(field, loc, arr, istag, jstag, order, ilbound, upperbound)
+
+    integer, intent(in) :: loc, istag, jstag, order, ilbound, upperbound
+    real, dimension(ilbound:) :: field
+    real, dimension(1:) :: arr
+
+    !local
+    integer ii
+    real(kind=R_GRID) :: S
+
+    call timing_on('lagbuff')
+
+    S = 0. ! here we sum all the polynomial*solution
+
+!OK with field 2D
+!!!!!!!!!!!!!!!!      do ii = ie-order,ie
+!!!!!!!!!!!!!!!!        !S = S + xp(ii - ie + order + 1, i, j, 2*istag + jstag + 1)*field(ii + istag, j)
+!!!!!!!!!!!!!!!!        S = S + arr(ii - ie + order + 1)*field(ii + istag, j)
+!!!!!!!!!!!!!!!!      end do
+!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!      field(i, j) = S
+
+
+     do ii = upperbound+order,upperbound,-1
+       S = S + arr(upperbound + order -ii + 1)*field(ii)
+     end do
+
+     field(loc) = S
+
+    call timing_off('lagbuff')
+  end subroutine lagrange_poly_buff_fast_minus
+
+
+
+  subroutine lagrange_poly_buff(field, i, j, bd, dg, direction, istag, jstag, order, ilbound, jlbound, corner)
+
+    integer, intent(in) :: i, j, istag, jstag, order, ilbound, jlbound
+    type(fv_grid_bounds_type), intent(IN) :: bd
+    real, dimension(ilbound:, jlbound:) :: field
     type(duogrid_type), target, intent(in) :: dg
     character(len=*), intent(in) :: direction
     logical, optional, intent(in) :: corner
 
     !local
     integer ii, iii, it
-    integer is, js, ie, je
+    integer is, js, ie, je, isd, jsd
     real(kind=R_GRID) :: ss, S
     !real(kind=R_GRID) :: ss_store(5, 1:interporder+1, bd%isd:bd%ied+1, bd%jsd:bd%jed+1, 0:1,0:1)
 
@@ -2386,28 +2775,37 @@ contains
     real(kind=R_GRID), pointer, dimension(:, :, :, :) :: yp
     real(kind=R_GRID), pointer, dimension(:, :, :, :) :: ym
 
-    xp => dg%xp
-    xm => dg%xm
-    yp => dg%yp
-    ym => dg%ym
+    call timing_on('lagbuff')
+
+    if (istag == 0 .and. jstag == 0) then
+      xp => dg%xp
+      xm => dg%xm
+      yp => dg%yp
+      ym => dg%ym
+    end if
+    if (istag == 1 .and. jstag == 1) then
+      xp => dg%xp3
+      xm => dg%xm3
+      yp => dg%yp3
+      ym => dg%ym3
+    end if
 
     S = 0. ! here we sum all the polynomial*solution
 
     is = bd%is
     js = bd%js
-    ie = bd%ie + istag
-    je = bd%je + jstag
+    ie = bd%ie
+    je = bd%je
     it = 1
 
-    call timing_on('lag')
     !call compute_lagrange_poly_interp_2d(ss_store, i, j, bd, dg, direction, istag, jstag, order, corner)
 
 !TO check: compute weight coefficients a priori?!
 
     if (direction == 'X+') then
 
-      do ii = bd%ie - interporder, bd%ie
-        S = S + xp(bd%ie - ii + 1, i, j, 2*istag + jstag + 1)*field(ii + istag, j)
+      do ii = ie-order,ie
+        S = S + xp(ii - ie + order + 1, i, j, 2*istag + jstag + 1)*field(ii + istag, j)
       end do
 
       field(i, j) = S
@@ -2416,7 +2814,7 @@ contains
 
     if (direction == 'X-') then
 
-      do ii = is + order, is, -1
+      do ii = is+order,is,-1
         S = S + xm(is + order - ii + 1, i, j, 2*istag + jstag + 1)*field(ii, j)
       end do
 
@@ -2426,8 +2824,8 @@ contains
 
     if (direction == 'Y+') then
 
-      do ii = bd%je - order, bd%je
-        S = S + yp(bd%je - ii + 1, i, j, 2*istag + jstag + 1)*field(i, ii + jstag)
+      do ii = je-order, je
+        S = S + yp(ii - je + order + 1, i, j, 2*istag + jstag + 1)*field(i, ii + jstag)
       end do
 
       field(i, j) = S
@@ -2436,7 +2834,7 @@ contains
 
     if (direction == 'Y-') then
 
-      do ii = js + order, js, -1
+      do ii = js+order,js,-1
         S = S + ym(js + order - ii + 1, i, j, 2*istag + jstag + 1)*field(i, ii)
       end do
 
@@ -2445,322 +2843,207 @@ contains
     end if
     nullify (xp, xm, yp, ym)
 
-    call timing_off('lag')
-  end subroutine lagrange_poly_interp_2d
+    call timing_off('lagbuff')
+  end subroutine lagrange_poly_buff
 
-  subroutine lagrange_poly_interp_3d(field, i, j, bd, dg, direction, istag, jstag, order, corner)
-    integer, intent(in) :: i, j, istag, jstag, order
+  subroutine cubed_a2d_halo_buff_only(npz, ubuff, vbuff, bd, dg, ilbound, iubound, jlbound, jubound)
+
+    integer, intent(in) ::  npz, ilbound, jlbound, iubound, jubound
+    real, intent(inout), dimension(ilbound:iubound, jlbound:jubound, npz) :: ubuff, vbuff
     type(fv_grid_bounds_type), intent(IN) :: bd
-    real, dimension(bd%isd:, bd%jsd:, 1:) :: field
+
     type(duogrid_type), target, intent(in) :: dg
-    character(len=*), intent(in) :: direction
-    logical, optional, intent(in) :: corner
 
     !local
-    integer ii, iii, it
-    integer is, js, ie, je
-    integer dims(3), k, npz
-    real(kind=R_GRID) :: ss
-    real, allocatable, dimension(:) :: S
-    !real(kind=R_GRID) :: ss_store(5, 1:interporder+1, bd%isd:bd%ied+1, bd%jsd:bd%jed+1, 0:1,0:1)
-
-    real(kind=R_GRID), pointer, dimension(:, :, :, :) :: xp
-    real(kind=R_GRID), pointer, dimension(:, :, :, :) :: xm
-    real(kind=R_GRID), pointer, dimension(:, :, :, :) :: yp
-    real(kind=R_GRID), pointer, dimension(:, :, :, :) :: ym
-
-    xp => dg%xp
-    xm => dg%xm
-    yp => dg%yp
-    ym => dg%ym
-
-    dims = shape(field)
-    npz = dims(3)
-    allocate (S(1:npz))
-
-    S = 0. ! here we sum all the polynomial*solution
-
-    is = bd%is
-    js = bd%js
-    ie = bd%ie + istag
-    je = bd%je + jstag
-    it = 1
-
-    call timing_on('lag')
-    !call compute_lagrange_poly_interp_2d(ss_store, i, j, bd, dg, direction, istag, jstag, order, corner)
-
-    do k = 1, npz
-      if (direction == 'X+') then
-
-        do ii = bd%ie - interporder, bd%ie
-          S(k) = S(k) + xp(bd%ie - ii + 1, i, j, 2*istag + jstag + 1)*field(ii + istag, j, k)
-        end do
-
-        field(i, j, k) = S(k)
-
-      end if
-
-      if (direction == 'X-') then
-
-        do ii = is + order, is, -1
-          S(k) = S(k) + xm(is + order - ii + 1, i, j, 2*istag + jstag + 1)*field(ii, j, k)
-        end do
-
-        field(i, j, k) = S(k)
-
-      end if
-
-      if (direction == 'Y+') then
-
-        do ii = bd%je - order, bd%je
-          S(k) = S(k) + yp(bd%je - ii + 1, i, j, 2*istag + jstag + 1)*field(i, ii + jstag, k)
-        end do
-
-        field(i, j, k) = S(k)
-
-      end if
-
-      if (direction == 'Y-') then
-
-        do ii = js + order, js, -1
-          S(k) = S(k) + ym(js + order - ii + 1, i, j, 2*istag + jstag + 1)*field(i, ii, k)
-        end do
-
-        field(i, j, k) = S(k)
-
-      end if
-    end do
-    nullify (xp, xm, yp, ym)
-    deallocate (S)
-
-    call timing_off('lag')
-
-  end subroutine lagrange_poly_interp_3d
-
-!!!!!!!!!!!!!!!!!!!!!!!!!!!
-! this is much slower!?!?!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!  subroutine lagrange_poly_interp_3d(field, i, j, bd, dg, direction, istag, jstag, order, corner)
-!
-!    integer, intent(in) :: i, j, istag, jstag, order
-!    type(fv_grid_bounds_type), intent(IN) :: bd
-!    real, dimension(bd%isd:, bd%jsd:, 1:) :: field
-!    type(duogrid_type), intent(in) :: dg
-!    character(len=*), intent(in) :: direction
-!    logical, optional, intent(in) :: corner
-!
-!    !local
-!    integer k, npz, dims(3)
-!
-!    dims = shape(field)
-!    npz = dims(3)
-!
-!    do k = 1, npz
-!      call lagrange_poly_interp_2d(field(:, :, k), i, j, bd, dg, direction, istag, jstag, order, corner)
-!    end do
-!
-!  end subroutine lagrange_poly_interp_3d
-
-  subroutine lagrange_poly_interp_4d(field, i, j, bd, dg, direction, istag, jstag, order, corner)
-
-    integer, intent(in) :: i, j, istag, jstag, order
-    type(fv_grid_bounds_type), intent(IN) :: bd
-    real, dimension(bd%isd:, bd%jsd:, 1:, 1:) :: field
-    type(duogrid_type), intent(in) :: dg
-    character(len=*), intent(in) :: direction
-    logical, optional, intent(in) :: corner
-
-    !local
-    integer k, q, npz, nq, dims(4)
-
-    dims = shape(field)
-    npz = dims(3)
-    nq = dims(4)
-
-    do q = 1, nq
-      call lagrange_poly_interp_3d(field(:, :, :, nq), i, j, bd, dg, direction, istag, jstag, order, corner)
-    end do
-
-  end subroutine lagrange_poly_interp_4d
-
-  !===========================================================================
-  !===========================================================================
-  !===========================================================================
-
-  subroutine cubed_a2c_halo(npz, uatemp, vatemp, uc, vc, dg)
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-! HERE WE USE THE BD OF ng=4 domain, so isd,ied,jsd,jed are offsetted by one
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-! Purpose; Transform wind on A grid to C grid
-
-    type(duogrid_type), intent(in), target :: dg
-    integer, intent(in):: npz
-    real, intent(inout), dimension(dg%bd%isd:dg%bd%ied, dg%bd%jsd:dg%bd%jed, npz):: uatemp, vatemp
-    real, intent(inout):: uc(dg%bd%isd:dg%bd%ied + 1, dg%bd%jsd:dg%bd%jed, npz)
-    real, intent(inout):: vc(dg%bd%isd:dg%bd%ied, dg%bd%jsd:dg%bd%jed + 1, npz)
-! local:
-    real v3(3, dg%bd%is - dg%bd%ng:dg%bd%ie + 1 + dg%bd%ng, dg%bd%js - dg%bd%ng:dg%bd%je + 1 + dg%bd%ng)
-    real ue(3, dg%bd%is - dg%bd%ng:dg%bd%ie + 1 + dg%bd%ng, dg%bd%js - dg%bd%ng:dg%bd%je + 1 + dg%bd%ng)    ! 3D winds at edges
-    real ve(3, dg%bd%is - dg%bd%ng:dg%bd%ie + 1 + dg%bd%ng, dg%bd%js - dg%bd%ng:dg%bd%je + 1 + dg%bd%ng)    ! 3D winds at edges
-
     integer i, j, k
 
+    real v3(3, ilbound:iubound, jlbound:jubound)
+    real ue(3, ilbound:iubound, jlbound:jubound)
+    real ve(3, ilbound:iubound, jlbound:jubound)
     real(kind=R_GRID), pointer, dimension(:, :, :, :) :: ew, es
     real(kind=R_GRID), pointer, dimension(:, :, :)   :: vlon, vlat
-
-    integer :: isd, ied, jsd, jed
-
-    isd = dg%bd%isd
-    ied = dg%bd%ied
-    jsd = dg%bd%jsd
-    jed = dg%bd%jed
-
+      call timing_on('a2d_halo_buff_routine')
     vlon => dg%vlon_ext
     vlat => dg%vlat_ext
     ew => dg%ew_ext
     es => dg%es_ext
 
-! check if this ok
-    call fill_corner_region(vatemp, dg%bd, dg, 0, 0)
-    call fill_corner_region(uatemp, dg%bd, dg, 0, 0)
-
+!$OMP parallel do default(none) shared(npz,jlbound,jubound,ilbound,iubound,ubuff,vbuff,vlon,vlat,es,ew) &
+!$OMP                          private(v3,ue,ve)
     do k = 1, npz
+
 ! Compute 3D wind on A grid
-      do j = jsd, jed
-        do i = isd, ied
-          v3(1, i, j) = uatemp(i, j, k)*vlon(i, j, 1) + vatemp(i, j, k)*vlat(i, j, 1)
-          v3(2, i, j) = uatemp(i, j, k)*vlon(i, j, 2) + vatemp(i, j, k)*vlat(i, j, 2)
-          v3(3, i, j) = uatemp(i, j, k)*vlon(i, j, 3) + vatemp(i, j, k)*vlat(i, j, 3)
-        end do
-      end do
-
-! A --> C
-! Interpolate to cell edges
-      do j = jsd, jed
-        do i = isd + 1, ied
-          ue(1, i, j) = 0.5*(v3(1, i - 1, j) + v3(1, i, j))
-          ue(2, i, j) = 0.5*(v3(2, i - 1, j) + v3(2, i, j))
-          ue(3, i, j) = 0.5*(v3(3, i - 1, j) + v3(3, i, j))
-        end do
-      end do
-
-      do j = jsd + 1, jed
-        do i = isd, ied
-          ve(1, i, j) = 0.5*(v3(1, i, j - 1) + v3(1, i, j))
-          ve(2, i, j) = 0.5*(v3(2, i, j - 1) + v3(2, i, j))
-          ve(3, i, j) = 0.5*(v3(3, i, j - 1) + v3(3, i, j))
-        end do
-      end do
-
-      do j = jsd, jed
-        do i = isd + 1, ied
-          uc(i, j, k) = ue(1, i, j)*ew(1, i, j, 1) + &
-                        ue(2, i, j)*ew(2, i, j, 1) + &
-                        ue(3, i, j)*ew(3, i, j, 1)
-        end do
-      end do
-      do j = jsd + 1, jed
-        do i = isd, ied
-          vc(i, j, k) = ve(1, i, j)*es(1, i, j, 2) + &
-                        ve(2, i, j)*es(2, i, j, 2) + &
-                        ve(3, i, j)*es(3, i, j, 2)
-        end do
-      end do
-
-    end do         ! k-loop
-
-  end subroutine cubed_a2c_halo
-
-  subroutine cubed_a2d_halo(npz, uatemp, vatemp, ud, vd, dg)
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-! HERE WE USE THE BD OF ng=4 domain, so isd,ied,jsd,jed are offsetted by one
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-! Purpose; Transform wind on A grid to D grid
-
-    type(duogrid_type), intent(IN), target :: dg
-    integer, intent(in):: npz
-    real, intent(inout), dimension(dg%bd%isd:dg%bd%ied, dg%bd%jsd:dg%bd%jed, npz):: uatemp, vatemp
-    real, intent(inout):: ud(dg%bd%isd:dg%bd%ied, dg%bd%jsd:dg%bd%jed + 1, npz)
-    real, intent(inout):: vd(dg%bd%isd:dg%bd%ied + 1, dg%bd%jsd:dg%bd%jed, npz)
-! local:
-    real v3(3, dg%bd%is - dg%bd%ng:dg%bd%ie + 1 + dg%bd%ng, dg%bd%js - dg%bd%ng:dg%bd%je + 1 + dg%bd%ng)
-    real ue(3, dg%bd%is - dg%bd%ng:dg%bd%ie + 1 + dg%bd%ng, dg%bd%js - dg%bd%ng:dg%bd%je + 1 + dg%bd%ng)    ! 3D winds at edges
-    real ve(3, dg%bd%is - dg%bd%ng:dg%bd%ie + 1 + dg%bd%ng, dg%bd%js - dg%bd%ng:dg%bd%je + 1 + dg%bd%ng)    ! 3D winds at edges
-
-    integer i, j, k
-
-    real(kind=R_GRID), pointer, dimension(:, :, :, :) :: ew, es
-    real(kind=R_GRID), pointer, dimension(:, :, :) :: vlon, vlat
-
-    integer :: isd, ied, jsd, jed
-
-    isd = dg%bd%isd
-    ied = dg%bd%ied
-    jsd = dg%bd%jsd
-    jed = dg%bd%jed
-
-    ud = -999.
-    vd = -888.
-
-    vlon => dg%vlon_ext
-    vlat => dg%vlat_ext
-    ew => dg%ew_ext
-    es => dg%es_ext
-
-! check if this ok
-    call fill_corner_region(vatemp, dg%bd, dg, 0, 0)
-    call fill_corner_region(uatemp, dg%bd, dg, 0, 0)
-
-    do k = 1, npz
-! Compute 3D wind on A grid
-      do j = jsd, jed
-        do i = isd, ied
-          v3(1, i, j) = uatemp(i, j, k)*vlon(i, j, 1) + vatemp(i, j, k)*vlat(i, j, 1)
-          v3(2, i, j) = uatemp(i, j, k)*vlon(i, j, 2) + vatemp(i, j, k)*vlat(i, j, 2)
-          v3(3, i, j) = uatemp(i, j, k)*vlon(i, j, 3) + vatemp(i, j, k)*vlat(i, j, 3)
+      do j = jlbound, jubound
+        do i = ilbound, iubound
+          v3(1, i, j) = ubuff(i, j, k)*vlon(i, j, 1) + vbuff(i, j, k)*vlat(i, j, 1)
+          v3(2, i, j) = ubuff(i, j, k)*vlon(i, j, 2) + vbuff(i, j, k)*vlat(i, j, 2)
+          v3(3, i, j) = ubuff(i, j, k)*vlon(i, j, 3) + vbuff(i, j, k)*vlat(i, j, 3)
         end do
       end do
 
 ! A --> D
 ! Interpolate to cell edges
-      do j = jsd + 1, jed
-        do i = isd, ied
+      do j = jlbound + 1, jubound
+        do i = ilbound, iubound
           ue(1, i, j) = 0.5*(v3(1, i, j - 1) + v3(1, i, j))
           ue(2, i, j) = 0.5*(v3(2, i, j - 1) + v3(2, i, j))
           ue(3, i, j) = 0.5*(v3(3, i, j - 1) + v3(3, i, j))
         end do
       end do
 
-      do j = jsd, jed
-        do i = isd + 1, ied
+      do j = jlbound, jubound
+        do i = ilbound + 1, iubound
           ve(1, i, j) = 0.5*(v3(1, i - 1, j) + v3(1, i, j))
           ve(2, i, j) = 0.5*(v3(2, i - 1, j) + v3(2, i, j))
           ve(3, i, j) = 0.5*(v3(3, i - 1, j) + v3(3, i, j))
         end do
       end do
 
-      do j = jsd + 1, jed
-        do i = isd, ied
-          ud(i, j, k) = ue(1, i, j)*es(1, i, j, 1) + &
-                        ue(2, i, j)*es(2, i, j, 1) + &
-                        ue(3, i, j)*es(3, i, j, 1)
+      do j = jlbound + 1, jubound
+        do i = ilbound, iubound
+          ubuff(i, j, k) = ue(1, i, j)*es(1, i, j, 1) + &
+                           ue(2, i, j)*es(2, i, j, 1) + &
+                           ue(3, i, j)*es(3, i, j, 1)
         end do
       end do
-      do j = jsd, jed
-        do i = isd + 1, ied
-          vd(i, j, k) = ve(1, i, j)*ew(1, i, j, 2) + &
-                        ve(2, i, j)*ew(2, i, j, 2) + &
-                        ve(3, i, j)*ew(3, i, j, 2)
+      do j = jlbound, jubound
+        do i = ilbound + 1, iubound
+          vbuff(i, j, k) = ve(1, i, j)*ew(1, i, j, 2) + &
+                           ve(2, i, j)*ew(2, i, j, 2) + &
+                           ve(3, i, j)*ew(3, i, j, 2)
         end do
       end do
 
-    end do         ! k-loop
+    end do
 
-  end subroutine cubed_a2d_halo
+    nullify (vlon,vlat,ew,es)
+      call timing_off('a2d_halo_buff_routine')
+  end subroutine cubed_a2d_halo_buff_only
+
+  subroutine cubed_a2c_halo_buff_only(npz, ubuff, vbuff, bd, dg, ilbound, iubound, jlbound, jubound)
+
+    integer, intent(in) :: npz, ilbound, jlbound, iubound, jubound
+    real, intent(inout), dimension(ilbound:iubound, jlbound:jubound, npz) :: ubuff, vbuff
+    type(fv_grid_bounds_type), intent(IN) :: bd
+
+    type(duogrid_type), target, intent(in) :: dg
+
+    !local
+    integer i, j, k
+
+    real v3(3, ilbound:iubound, jlbound:jubound)
+    real ue(3, ilbound:iubound, jlbound:jubound)
+    real ve(3, ilbound:iubound, jlbound:jubound)
+    real(kind=R_GRID), pointer, dimension(:, :, :, :) :: ew, es
+    real(kind=R_GRID), pointer, dimension(:, :, :)   :: vlon, vlat
+
+      call timing_on('a2c_halo_buff_routine')
+    vlon => dg%vlon_ext
+    vlat => dg%vlat_ext
+    ew => dg%ew_ext
+    es => dg%es_ext
+
+!$OMP parallel do default(none) shared(npz,jlbound,jubound,ilbound,iubound,ubuff,vbuff,vlon,vlat,es,ew) &
+!$OMP                          private(v3,ue,ve)
+    do k = 1, npz
+
+! Compute 3D wind on A grid
+      do j = jlbound, jubound
+        do i = ilbound, iubound
+          v3(1, i, j) = ubuff(i, j, k)*vlon(i, j, 1) + vbuff(i, j, k)*vlat(i, j, 1)
+          v3(2, i, j) = ubuff(i, j, k)*vlon(i, j, 2) + vbuff(i, j, k)*vlat(i, j, 2)
+          v3(3, i, j) = ubuff(i, j, k)*vlon(i, j, 3) + vbuff(i, j, k)*vlat(i, j, 3)
+        end do
+!      end do
+
+! A --> C
+! Interpolate to cell edges
+!      do j = jsd, jed
+        do i = ilbound + 1, iubound
+          ue(1, i, j) = 0.5*(v3(1, i - 1, j) + v3(1, i, j))
+          ue(2, i, j) = 0.5*(v3(2, i - 1, j) + v3(2, i, j))
+          ue(3, i, j) = 0.5*(v3(3, i - 1, j) + v3(3, i, j))
+        end do
+      end do
+
+      do j = jlbound + 1, jubound
+        do i = ilbound, iubound
+          ve(1, i, j) = 0.5*(v3(1, i, j - 1) + v3(1, i, j))
+          ve(2, i, j) = 0.5*(v3(2, i, j - 1) + v3(2, i, j))
+          ve(3, i, j) = 0.5*(v3(3, i, j - 1) + v3(3, i, j))
+        end do
+      end do
+
+      do j = jlbound + 1, jubound
+        do i = ilbound, iubound
+          ubuff(i, j, k) = ue(1, i, j)*ew(1, i, j, 1) + &
+                           ue(2, i, j)*ew(2, i, j, 1) + &
+                           ue(3, i, j)*ew(3, i, j, 1)
+        end do
+      end do
+      do j = jlbound + 1, jubound
+        do i = ilbound, iubound
+          vbuff(i, j, k) = ve(1, i, j)*es(1, i, j, 2) + &
+                           ve(2, i, j)*es(2, i, j, 2) + &
+                           ve(3, i, j)*es(3, i, j, 2)
+        end do
+      end do
+
+    end do
+
+    nullify (vlon,vlat,ew,es)
+      call timing_on('a2c_halo_buff_routine')
+  end subroutine cubed_a2c_halo_buff_only
+
+  subroutine l2c_halo_buff_only(npz, ubuff, vbuff, bd, ilbound, iubound, jlbound, jubound, l2c)
+    integer, intent(in) ::  npz, ilbound, jlbound, iubound, jubound
+    type(fv_grid_bounds_type), intent(IN) :: bd
+    real(kind=R_GRID), intent(in), dimension(2, 2, bd%isd:bd%ied, bd%jsd:bd%jed) :: l2c
+    real, intent(inout), dimension(ilbound:iubound, jlbound:jubound, npz) :: ubuff, vbuff
+    !local
+    integer i, j, k
+    real tempu
+
+    ! Compute 3D wind on A grid
+!$OMP parallel do default(none) shared(npz,jlbound,jubound,ilbound,iubound,ubuff,vbuff,l2c) &
+!$OMP                          private(tempu)
+    do k = 1, npz
+      do j = jlbound, jubound
+        do i = ilbound, iubound
+          tempu = l2c(1, 1, i, j)*ubuff(i, j, k) + l2c(1, 2, i, j)*vbuff(i, j, k)
+          vbuff(i, j, k) = l2c(2, 1, i, j)*ubuff(i, j, k) + l2c(2, 2, i, j)*vbuff(i, j, k)
+          ubuff(i, j, k) = tempu
+        end do
+      end do
+    end do
+  end subroutine l2c_halo_buff_only
+
+  subroutine c2l_agrid(u_in, v_in, ull, vll, npz, bd, c2l)
+    type(fv_grid_bounds_type), intent(IN) :: bd
+    integer, intent(in) :: npz
+    real(kind=R_GRID), intent(in) ::  c2l(2, 2, bd%isd:bd%ied, bd%jsd:bd%jed)
+    real, intent(in), dimension(bd%isd:bd%ied, bd%jsd:bd%jed, npz) :: u_in, v_in
+    real, intent(out), dimension(bd%isd:bd%ied, bd%jsd:bd%jed, npz) :: ull, vll
+    ! Local
+    integer i, j, k
+    integer :: is, ie, js, je
+
+    is = bd%is
+    ie = bd%ie
+    js = bd%js
+    je = bd%je
+
+    !$OMP parallel do default(none) shared(npz,is,ie,js,je,ull,vll,c2l,u_in,v_in)
+    do k = 1, npz
+      do j = js, je
+        do i = is, ie
+          ull(i, j, k) = c2l(1, 1, i, j)*u_in(i, j, k) + c2l(1, 2, i, j)*v_in(i, j, k)
+          vll(i, j, k) = c2l(2, 1, i, j)*u_in(i, j, k) + c2l(2, 2, i, j)*v_in(i, j, k)
+        end do
+      end do
+    end do
+
+  end subroutine c2l_agrid
 
   subroutine c2l_ord2_cgrid(u, v, ua, va, gridstruct, km, grid_type, bd, do_halo)
     type(fv_grid_bounds_type), intent(IN) :: bd
@@ -2995,6 +3278,277 @@ contains
   !===========================================================================
   !===========================================================================
 
+!############# from fv_grid_utils to avoid circular modules
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  subroutine normalize_vect(e)
+!                              Make e an unit vector
+    real(kind=R_GRID), intent(inout):: e(3)
+    real(f_p):: pdot
+    integer k
+
+    pdot = e(1)**2 + e(2)**2 + e(3)**2
+    pdot = sqrt(pdot)
+
+    do k = 1, 3
+      e(k) = e(k)/pdot
+    end do
+
+  end subroutine normalize_vect
+
+  subroutine mid_pt_sphere(p1, p2, pm)
+    real(kind=R_GRID), intent(IN)  :: p1(2), p2(2)
+    real(kind=R_GRID), intent(OUT) :: pm(2)
+!------------------------------------------
+    real(kind=R_GRID) e1(3), e2(3), e3(3)
+
+    call latlon2xyz(p1, e1)
+    call latlon2xyz(p2, e2)
+    call mid_pt3_cart(e1, e2, e3)
+    call cart_to_latlon(1, e3, pm(1), pm(2))
+
+  end subroutine mid_pt_sphere
+
+  subroutine cart_to_latlon(np, q, xs, ys)
+! vector version of cart_to_latlon1
+    integer, intent(in):: np
+    real(kind=R_GRID), intent(inout):: q(3, np)
+    real(kind=R_GRID), intent(inout):: xs(np), ys(np)
+! local
+    real(kind=R_GRID), parameter:: esl = 1.d-10
+    real(f_p):: p(3)
+    real(f_p):: dist, lat, lon
+    integer i, k
+
+    do i = 1, np
+      do k = 1, 3
+        p(k) = q(k, i)
+      end do
+      dist = sqrt(p(1)**2 + p(2)**2 + p(3)**2)
+      do k = 1, 3
+        p(k) = p(k)/dist
+      end do
+
+      if ((abs(p(1)) + abs(p(2))) < esl) then
+        lon = real(0., kind=f_p)
+      else
+        lon = atan2(p(2), p(1))   ! range [-pi,pi]
+      end if
+
+      if (lon < 0.) lon = real(2., kind=f_p)*pi + lon
+! RIGHT_HAND system:
+      lat = asin(p(3))
+
+      xs(i) = lon
+      ys(i) = lat
+! q Normalized:
+      do k = 1, 3
+        q(k, i) = p(k)
+      end do
+    end do
+
+  end subroutine cart_to_latlon
+
+  subroutine mid_pt3_cart(p1, p2, e)
+    real(kind=R_GRID), intent(IN)  :: p1(3), p2(3)
+    real(kind=R_GRID), intent(OUT) :: e(3)
+!
+    real(f_p):: q1(3), q2(3)
+    real(f_p):: dd, e1, e2, e3
+    integer k
+
+    do k = 1, 3
+      q1(k) = p1(k)
+      q2(k) = p2(k)
+    end do
+
+    e1 = q1(1) + q2(1)
+    e2 = q1(2) + q2(2)
+    e3 = q1(3) + q2(3)
+
+    dd = sqrt(e1**2 + e2**2 + e3**2)
+    e1 = e1/dd
+    e2 = e2/dd
+    e3 = e3/dd
+
+    e(1) = e1
+    e(2) = e2
+    e(3) = e3
+
+  end subroutine mid_pt3_cart
+
+  subroutine mid_pt_cart(p1, p2, e3)
+    real(kind=R_GRID), intent(IN)  :: p1(2), p2(2)
+    real(kind=R_GRID), intent(OUT) :: e3(3)
+!-------------------------------------
+    real(kind=R_GRID) e1(3), e2(3)
+
+    call latlon2xyz(p1, e1)
+    call latlon2xyz(p2, e2)
+    call mid_pt3_cart(e1, e2, e3)
+
+  end subroutine mid_pt_cart
+
+  subroutine vect_cross(e, p1, p2)
+    real(kind=R_GRID), intent(in) :: p1(3), p2(3)
+    real(kind=R_GRID), intent(out):: e(3)
+!
+! Perform cross products of 3D vectors: e = P1 X P2
+!
+    e(1) = p1(2)*p2(3) - p1(3)*p2(2)
+    e(2) = p1(3)*p2(1) - p1(1)*p2(3)
+    e(3) = p1(1)*p2(2) - p1(2)*p2(1)
+
+  end subroutine vect_cross
+
+  subroutine latlon2xyz2(lon, lat, p3)
+    real(kind=R_GRID), intent(in):: lon, lat
+    real(kind=R_GRID), intent(out):: p3(3)
+    real(kind=R_GRID) e(2)
+
+    e(1) = lon; e(2) = lat
+    call latlon2xyz(e, p3)
+
+  end subroutine latlon2xyz2
+
+  subroutine latlon2xyz(p, e, id)
+!
+! Routine to map (lon, lat) to (x,y,z)
+!
+    real(kind=R_GRID), intent(in) :: p(2)
+    real(kind=R_GRID), intent(out):: e(3)
+    integer, optional, intent(in):: id   ! id=0 do nothing; id=1, right_hand
+
+    integer n
+    real(f_p):: q(2)
+    real(f_p):: e1, e2, e3
+
+    do n = 1, 2
+      q(n) = p(n)
+    end do
+
+    e1 = cos(q(2))*cos(q(1))
+    e2 = cos(q(2))*sin(q(1))
+    e3 = sin(q(2))
+!-----------------------------------
+! Truncate to the desired precision:
+!-----------------------------------
+    e(1) = e1
+    e(2) = e2
+    e(3) = e3
+
+  end subroutine latlon2xyz
+
+  real function great_circle_dist(q1, q2, radius)
+    real(kind=R_GRID), intent(IN)           :: q1(2), q2(2)
+    real(kind=R_GRID), intent(IN), optional :: radius
+
+    real(f_p):: p1(2), p2(2)
+    real(f_p):: beta
+    integer n
+
+    do n = 1, 2
+      p1(n) = q1(n)
+      p2(n) = q2(n)
+    end do
+
+    beta = asin(sqrt(sin((p1(2) - p2(2))/2.)**2 + cos(p1(2))*cos(p2(2))* &
+                     sin((p1(1) - p2(1))/2.)**2))*2.
+
+    if (present(radius)) then
+      great_circle_dist = radius*beta
+    else
+      great_circle_dist = beta   ! Returns the angle
+    end if
+
+  end function great_circle_dist
+
+  subroutine c2l_ord2(u, v, ua, va, gridstruct, km, grid_type, bd, do_halo)
+    type(fv_grid_bounds_type), intent(IN) :: bd
+    integer, intent(in) :: km, grid_type
+    real, intent(in) ::  u(bd%isd:bd%ied, bd%jsd:bd%jed + 1, km)
+    real, intent(in) ::  v(bd%isd:bd%ied + 1, bd%jsd:bd%jed, km)
+    type(fv_grid_type), intent(IN), target :: gridstruct
+    logical, intent(in) :: do_halo
+!
+    real, intent(out):: ua(bd%isd:bd%ied, bd%jsd:bd%jed, km)
+    real, intent(out):: va(bd%isd:bd%ied, bd%jsd:bd%jed, km)
+!--------------------------------------------------------------
+! Local
+    real wu(bd%is - 1:bd%ie + 1, bd%js - 1:bd%je + 2)
+    real wv(bd%is - 1:bd%ie + 2, bd%js - 1:bd%je + 1)
+    real u1(bd%is - 1:bd%ie + 1), v1(bd%is - 1:bd%ie + 1)
+    integer i, j, k
+    integer :: is, ie, js, je
+
+    real, dimension(:, :), pointer :: a11, a12, a21, a22
+    real, dimension(:, :), pointer :: dx, dy, rdxa, rdya
+
+    a11 => gridstruct%a11
+    a12 => gridstruct%a12
+    a21 => gridstruct%a21
+    a22 => gridstruct%a22
+
+    dx => gridstruct%dx
+    dy => gridstruct%dy
+    rdxa => gridstruct%rdxa
+    rdya => gridstruct%rdya
+
+    if (do_halo) then
+      is = bd%is - 1
+      ie = bd%ie + 1
+      js = bd%js - 1
+      je = bd%je + 1
+    else
+      is = bd%is
+      ie = bd%ie
+      js = bd%js
+      je = bd%je
+    end if
+
+!$OMP parallel do default(none) shared(is,ie,js,je,km,grid_type,u,dx,v,dy,ua,va,a11,a12,a21,a22) &
+!$OMP                          private(u1, v1, wu, wv)
+    do k = 1, km
+      if (grid_type < 4) then
+        do j = js, je + 1
+          do i = is, ie
+            wu(i, j) = u(i, j, k)*dx(i, j)
+          end do
+        end do
+        do j = js, je
+          do i = is, ie + 1
+            wv(i, j) = v(i, j, k)*dy(i, j)
+          end do
+        end do
+
+        do j = js, je
+          do i = is, ie
+! Co-variant to Co-variant "vorticity-conserving" interpolation
+            u1(i) = 2.*(wu(i, j) + wu(i, j + 1))/(dx(i, j) + dx(i, j + 1))
+            v1(i) = 2.*(wv(i, j) + wv(i + 1, j))/(dy(i, j) + dy(i + 1, j))
+!!!          u1(i) = (wu(i,j) + wu(i,j+1)) * rdxa(i,j)
+!!!          v1(i) = (wv(i,j) + wv(i+1,j)) * rdya(i,j)
+! Cubed (cell center co-variant winds) to lat-lon:
+            ua(i, j, k) = a11(i, j)*u1(i) + a12(i, j)*v1(i)
+            va(i, j, k) = a21(i, j)*u1(i) + a22(i, j)*v1(i)
+          end do
+        end do
+      else
+! 2nd order:
+        do j = js, je
+          do i = is, ie
+            ua(i, j, k) = 0.5*(u(i, j, k) + u(i, j + 1, k))
+            va(i, j, k) = 0.5*(v(i, j, k) + v(i + 1, j, k))
+          end do
+        end do
+      end if
+    end do
+
+  end subroutine c2l_ord2
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   subroutine duogrid_alloc(dg, bd, flagstruct)
     type(duogrid_type), intent(INOUT), target :: dg
     type(fv_flags_type), intent(INOUT) :: flagstruct
@@ -3021,6 +3575,7 @@ contains
 
     ! lon lat
     allocate (dg%a_pt(2, isd:ied, jsd:jed))
+    allocate (dg%a_kik(2, isd:ied, jsd:jed))
     allocate (dg%b_pt(2, isd:ied + 1, jsd:jed + 1))
     allocate (dg%c_pt(2, isd:ied + 1, jsd:jed + 1))
     allocate (dg%d_pt(2, isd:ied + 1, jsd:jed + 1))
@@ -3138,11 +3693,20 @@ contains
 
     ! corner lag coeff
     ! these are used with domain ng=3
-    allocate (dg%xp(1:interporder + 1, bd%ie - interporder:bd%ied + 1, bd%jsd:bd%jed + 1, 4))
-    allocate (dg%xm(1:interporder + 1, bd%isd:bd%is + interporder, bd%jsd:bd%jed + 1, 4))
-    allocate (dg%yp(1:interporder + 1, bd%isd:bd%ied + 1, bd%je - interporder:bd%jed + 1, 4))
-    allocate (dg%ym(1:interporder + 1, bd%isd:bd%ied + 1, bd%jsd:bd%js + interporder, 4))
+    !allocate (dg%xp(1:interporder + 1, bd%ie - interporder:bd%ied + 1, bd%jsd:bd%jed + 1, 4))
+    !allocate (dg%xm(1:interporder + 1, bd%isd:bd%is + interporder, bd%jsd:bd%jed + 1, 4))
+    !allocate (dg%yp(1:interporder + 1, bd%isd:bd%ied + 1, bd%je - interporder:bd%jed + 1, 4))
+    !allocate (dg%ym(1:interporder + 1, bd%isd:bd%ied + 1, bd%jsd:bd%js + interporder, 4))
 
+    allocate (dg%xp3(1:interporder + 1, bd%ie - interporder:bd%ied + 1, bd%jsd:bd%jed + 1, 4))
+    allocate (dg%xm3(1:interporder + 1, bd%isd:bd%is + interporder, bd%jsd:bd%jed + 1, 4))
+    allocate (dg%yp3(1:interporder + 1, bd%isd:bd%ied + 1, bd%je - interporder:bd%jed + 1, 4))
+    allocate (dg%ym3(1:interporder + 1, bd%isd:bd%ied + 1, bd%jsd:bd%js + interporder, 4))
+
+    allocate (dg%xp(1:interporder + 1, dg%bd%ie - interporder:dg%bd%ied + 1, dg%bd%jsd:dg%bd%jed + 1, 4))
+    allocate (dg%xm(1:interporder + 1, dg%bd%isd:dg%bd%is + interporder, dg%bd%jsd:dg%bd%jed + 1, 4))
+    allocate (dg%yp(1:interporder + 1, dg%bd%isd:dg%bd%ied + 1, dg%bd%je - interporder:dg%bd%jed + 1, 4))
+    allocate (dg%ym(1:interporder + 1, dg%bd%isd:dg%bd%ied + 1, dg%bd%jsd:dg%bd%js + interporder, 4))
   end subroutine duogrid_alloc
   !===========================================================================
   subroutine duogrid_dealloc(dg)
@@ -3197,6 +3761,7 @@ contains
 
     ! lon lat
     deallocate (dg%a_pt)
+    deallocate (dg%a_kik)
     deallocate (dg%b_pt)
 
     ! B-grid
@@ -3260,214 +3825,6 @@ contains
     deallocate (dg%es_ext)
   end subroutine duogrid_dealloc
   !===========================================================================
-
-
- subroutine c2l_ord2(u, v, ua, va, gridstruct, km, grid_type, bd, do_halo)
- type(fv_grid_bounds_type), intent(IN) :: bd
-  integer, intent(in) :: km, grid_type
-  real, intent(in) ::  u(bd%isd:bd%ied,bd%jsd:bd%jed+1,km)
-  real, intent(in) ::  v(bd%isd:bd%ied+1,bd%jsd:bd%jed,km)
- type(fv_grid_type), intent(IN), target :: gridstruct
- logical, intent(in) :: do_halo
-!
-  real, intent(out):: ua(bd%isd:bd%ied, bd%jsd:bd%jed,km)
-  real, intent(out):: va(bd%isd:bd%ied, bd%jsd:bd%jed,km)
-!--------------------------------------------------------------
-! Local
-  real wu(bd%is-1:bd%ie+1,  bd%js-1:bd%je+2)
-  real wv(bd%is-1:bd%ie+2,  bd%js-1:bd%je+1)
-  real u1(bd%is-1:bd%ie+1), v1(bd%is-1:bd%ie+1)
-  integer i, j, k
-  integer :: is,  ie,  js,  je
-
-  real, dimension(:,:), pointer :: a11, a12, a21, a22
-  real, dimension(:,:), pointer :: dx, dy, rdxa, rdya
-
-  a11 => gridstruct%a11
-  a12 => gridstruct%a12
-  a21 => gridstruct%a21
-  a22 => gridstruct%a22
-
-  dx   => gridstruct%dx
-  dy   => gridstruct%dy
-  rdxa => gridstruct%rdxa
-  rdya => gridstruct%rdya
-
-  if (do_halo) then
-     is  = bd%is-1
-     ie  = bd%ie+1
-     js  = bd%js-1
-     je  = bd%je+1
-  else
-     is  = bd%is
-     ie  = bd%ie
-     js  = bd%js
-     je  = bd%je
-  endif
-
-!$OMP parallel do default(none) shared(is,ie,js,je,km,grid_type,u,dx,v,dy,ua,va,a11,a12,a21,a22) &
-!$OMP                          private(u1, v1, wu, wv)
-  do k=1,km
-     if ( grid_type < 4 ) then
-       do j=js,je+1
-          do i=is,ie
-             wu(i,j) = u(i,j,k)*dx(i,j)
-          enddo
-       enddo
-       do j=js,je
-          do i=is,ie+1
-             wv(i,j) = v(i,j,k)*dy(i,j)
-          enddo
-       enddo
-
-       do j=js,je
-          do i=is,ie
-! Co-variant to Co-variant "vorticity-conserving" interpolation
-             u1(i) = 2.*(wu(i,j) + wu(i,j+1)) / (dx(i,j)+dx(i,j+1))
-             v1(i) = 2.*(wv(i,j) + wv(i+1,j)) / (dy(i,j)+dy(i+1,j))
-!!!          u1(i) = (wu(i,j) + wu(i,j+1)) * rdxa(i,j)
-!!!          v1(i) = (wv(i,j) + wv(i+1,j)) * rdya(i,j)
-! Cubed (cell center co-variant winds) to lat-lon:
-             ua(i,j,k) = a11(i,j)*u1(i) + a12(i,j)*v1(i)
-             va(i,j,k) = a21(i,j)*u1(i) + a22(i,j)*v1(i)
-          enddo
-       enddo
-     else
-! 2nd order:
-       do j=js,je
-          do i=is,ie
-             ua(i,j,k) = 0.5*(u(i,j,k)+u(i,  j+1,k))
-             va(i,j,k) = 0.5*(v(i,j,k)+v(i+1,j,  k))
-          enddo
-       enddo
-     endif
-  enddo
-
- end subroutine c2l_ord2
-
-
- real function great_circle_dist( q1, q2, radius )
-      real(kind=R_GRID), intent(IN)           :: q1(2), q2(2)
-      real(kind=R_GRID), intent(IN), optional :: radius
-
-      real (kind=R_GRID):: p1(2), p2(2)
-      real (kind=R_GRID):: beta
-      integer n
-
-      do n=1,2
-         p1(n) = q1(n)
-         p2(n) = q2(n)
-      enddo
-
-      beta = asin( sqrt( sin((p1(2)-p2(2))/2.)**2 + cos(p1(2))*cos(p2(2))*   &
-                         sin((p1(1)-p2(1))/2.)**2 ) ) * 2.
-
-      if ( present(radius) ) then
-           great_circle_dist = radius * beta
-      else
-           great_circle_dist = beta   ! Returns the angle
-      endif
-
-  end function great_circle_dist
-
- subroutine mid_pt_cart(p1, p2, e3)
-    real(kind=R_GRID), intent(IN)  :: p1(2), p2(2)
-    real(kind=R_GRID), intent(OUT) :: e3(3)
-!-------------------------------------
-    real(kind=R_GRID) e1(3), e2(3)
-
-    call latlon2xyz(p1, e1)
-    call latlon2xyz(p2, e2)
-    call mid_pt3_cart(e1, e2, e3)
-
- end subroutine mid_pt_cart
-
- subroutine mid_pt3_cart(p1, p2, e)
-       real(kind=R_GRID), intent(IN)  :: p1(3), p2(3)
-       real(kind=R_GRID), intent(OUT) :: e(3)
-!
-       real (kind=R_GRID):: q1(3), q2(3)
-       real (kind=R_GRID):: dd, e1, e2, e3
-       integer k
-
-       do k=1,3
-          q1(k) = p1(k)
-          q2(k) = p2(k)
-       enddo
-
-       e1 = q1(1) + q2(1)
-       e2 = q1(2) + q2(2)
-       e3 = q1(3) + q2(3)
-
-       dd = sqrt( e1**2 + e2**2 + e3**2 )
-       e1 = e1 / dd
-       e2 = e2 / dd
-       e3 = e3 / dd
-
-       e(1) = e1
-       e(2) = e2
-       e(3) = e3
-
- end subroutine mid_pt3_cart
-
-
-
- subroutine latlon2xyz(p, e, id)
-!
-! Routine to map (lon, lat) to (x,y,z)
-!
- real(kind=R_GRID), intent(in) :: p(2)
- real(kind=R_GRID), intent(out):: e(3)
- integer, optional, intent(in):: id   ! id=0 do nothing; id=1, right_hand
-
- integer n
- real (kind=R_GRID):: q(2)
- real (kind=R_GRID):: e1, e2, e3
-
-    do n=1,2
-       q(n) = p(n)
-    enddo
-
-    e1 = cos(q(2)) * cos(q(1))
-    e2 = cos(q(2)) * sin(q(1))
-    e3 = sin(q(2))
-!-----------------------------------
-! Truncate to the desired precision:
-!-----------------------------------
-    e(1) = e1
-    e(2) = e2
-    e(3) = e3
-
- end subroutine latlon2xyz
-
- subroutine vect_cross(e, p1, p2)
- real(kind=R_GRID), intent(in) :: p1(3), p2(3)
- real(kind=R_GRID), intent(out):: e(3)
-!
-! Perform cross products of 3D vectors: e = P1 X P2
-!
-      e(1) = p1(2)*p2(3) - p1(3)*p2(2)
-      e(2) = p1(3)*p2(1) - p1(1)*p2(3)
-      e(3) = p1(1)*p2(2) - p1(2)*p2(1)
-
- end subroutine vect_cross
-
-
- subroutine normalize_vect(e)
-!                              Make e an unit vector
- real(kind=R_GRID), intent(inout):: e(3)
- real(kind=R_GRID):: pdot
- integer k
-
-    pdot = e(1)**2 + e(2)**2 + e(3)**2
-    pdot = sqrt( pdot )
-
-    do k=1,3
-       e(k) = e(k) / pdot
-    enddo
-
- end subroutine normalize_vect
-
 
 end module duogrid_mod
 

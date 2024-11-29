@@ -32,7 +32,7 @@ module fv_dynamics_mod
    use fv_mp_mod,           only: start_group_halo_update, complete_group_halo_update
    use fv_timing_mod,       only: timing_on, timing_off
    use diag_manager_mod,    only: send_data
-   use fv_diagnostics_mod,  only: fv_time, prt_mxm, range_check, prt_minmax
+   use fv_diagnostics_mod,  only: fv_time, prt_mxm, range_check, prt_minmax, is_ideal_case
    use mpp_domains_mod,     only: DGRID_NE, CGRID_NE, mpp_update_domains, domain2D
    use mpp_mod,             only: mpp_pe
    use field_manager_mod,   only: MODEL_ATMOS
@@ -48,7 +48,6 @@ module fv_dynamics_mod
                                   fv_diag_type, fv_grid_bounds_type, inline_mp_type
    use fv_nwp_nudge_mod,    only: do_adiabatic_init
    use duogrid_mod,         only: ext_scalar
-   use test_cases_mod,      only: test_case
 
 implicit none
    logical :: RF_initialized = .false.
@@ -76,8 +75,7 @@ contains
   subroutine fv_dynamics(npx, npy, npz, nq_tot,  ng, bdt, consv_te, fill,               &
                         reproduce_sum, kappa, cp_air, zvir, ptop, ks, ncnst, n_split,     &
                         q_split, u, v, w, delz, hydrostatic, duogrid, pt, delp, q,   &
-                        ps, pe, pk, peln, pkz, phis, q_con, omga, ua, va, uc, vc, uc_old, vc_old,&
-                        forcing_uc, forcing_vc, forcing_ud, forcing_vd, forcing_delp, &
+                        ps, pe, pk, peln, pkz, phis, q_con, omga, ua, va, uc, vc,          &
                         ak, bk, mfx, mfy, cx, cy, ze0, hybrid_z, &
                         gridstruct, flagstruct, neststruct, idiag, bd, &
                         parent_grid, domain, inline_mp, diss_est, time_total)
@@ -114,12 +112,7 @@ contains
     real, intent(inout) ::  ze0(bd%is:, bd%js: ,1:) ! height at edges (m); non-hydrostatic
     real, intent(inout) :: diss_est(bd%isd:bd%ied  ,bd%jsd:bd%jed, npz) ! diffusion estimate for SKEB
 ! ze0 no longer used
-    real, intent(INOUT) ::  forcing_uc(bd%isd:bd%ied+1,bd%jsd:bd%jed)
-    real, intent(INOUT) ::  forcing_vc(bd%isd:bd%ied  ,bd%jsd:bd%jed+1)
-    real, intent(INOUT) ::  forcing_ud(bd%isd:bd%ied  ,bd%jsd:bd%jed+1)
-    real, intent(INOUT) ::  forcing_vd(bd%isd:bd%ied+1,bd%jsd:bd%jed)
-    real, intent(INOUT) ::  forcing_delp(bd%isd:bd%ied  ,bd%jsd:bd%jed)
- 
+
 !-----------------------------------------------------------------------
 ! Auxilliary pressure arrays:
 ! The 5 vars below can be re-computed from delp and ptop.
@@ -139,8 +132,6 @@ contains
     real, intent(inout) :: omga(bd%isd:bd%ied,bd%jsd:bd%jed,npz)   ! Vertical pressure velocity (pa/s)
     real, intent(inout) :: uc(bd%isd:bd%ied+1,bd%jsd:bd%jed  ,npz) ! (uc,vc) mostly used as the C grid winds
     real, intent(inout) :: vc(bd%isd:bd%ied  ,bd%jsd:bd%jed+1,npz)
-    real, intent(inout) :: uc_old(bd%isd:bd%ied+1,bd%jsd:bd%jed  ,npz) ! (uc,vc) mostly used as the C grid winds
-    real, intent(inout) :: vc_old(bd%isd:bd%ied  ,bd%jsd:bd%jed+1,npz)
 
     real, intent(inout), dimension(bd%isd:bd%ied ,bd%jsd:bd%jed ,npz):: ua, va
     real, intent(in),    dimension(npz+1):: ak, bk
@@ -491,8 +482,7 @@ contains
                                            call timing_on('DYN_CORE')
       call dyn_core(npx, npy, npz, ng, sphum, nq, mdt, n_map, n_split, zvir, cp_air, akap, cappa, grav, hydrostatic, &
                     duogrid, u, v, w, delz, pt, q, delp, pe, pk, phis, ws, omga, ptop, pfull, ua, va,           &
-                    uc, vc, uc_old, vc_old, mfx, mfy, cx, cy, pkz, peln, q_con, ak, bk, ks, &
-                    forcing_uc, forcing_vc, forcing_ud, forcing_vd, forcing_delp, &
+                    uc, vc, mfx, mfy, cx, cy, pkz, peln, q_con, ak, bk, ks, &
                     gridstruct, flagstruct, neststruct, idiag, bd, &
                     domain, n_map==1, i_pack, last_step, diss_est, &
                     consv_te, te_2d, time_total)
@@ -501,19 +491,11 @@ contains
 
 #ifdef SW_DYNAMICS
 !!$OMP parallel do default(none) shared(is,ie,js,je,ps,delp,agrav)
-      if(test_case>1) then
-         do j=js,je
-            do i=is,ie
-               ps(i,j) = delp(i,j,1) * agrav
-            enddo
+      do j=js,je
+         do i=is,ie
+            ps(i,j) = delp(i,j,1) * agrav
          enddo
-      else
-         do j=js,je
-            do i=is,ie
-               ps(i,j) = delp(i,j,1) * agrav/q(i,j,1,1)
-            enddo
-         enddo
-      endif
+      enddo
 #else
       if( .not. flagstruct%inline_q .and. nq /= 0 ) then
 !--------------------------------------------------------
@@ -928,7 +910,7 @@ contains
 
  subroutine Rayleigh_Super(dt, npx, npy, npz, ks, pm, phis, tau, u, v, w, pt,  &
                            ua, va, delz, agrid, cp, rg, ptop, hydrostatic,     &
-                           conserve, rf_cutoff, gridstruct, flagstruct, domain, bd)
+                           conserve, rf_cutoff, gridstruct, domain, bd)
     real, intent(in):: dt
     real, intent(in):: tau              ! time scale (days)
     real, intent(in):: cp, rg, ptop, rf_cutoff
@@ -947,7 +929,6 @@ contains
     real,   intent(in) :: agrid(bd%isd:bd%ied,  bd%jsd:bd%jed,2)
     real, intent(in) :: phis(bd%isd:bd%ied,bd%jsd:bd%jed)     ! Surface geopotential (g*Z_surf)
     type(fv_grid_type), intent(INOUT) :: gridstruct
-    type(fv_flags_type), intent(INOUT) :: flagstruct
     type(domain2d), intent(INOUT) :: domain
 !
     real, allocatable ::  u2f(:,:,:)
@@ -971,7 +952,7 @@ contains
     rcv = 1. / (cp - rg)
 
      if ( .not. RF_initialized ) then
-        if (flagstruct%is_ideal_case )then
+        if ( is_ideal_case )then
           allocate ( u00(is:ie,  js:je+1,npz) )
           allocate ( v00(is:ie+1,js:je  ,npz) )
 !$OMP parallel do default(none) shared(is,ie,js,je,npz,u00,u,v00,v)
@@ -1034,11 +1015,11 @@ endif
                                         call timing_off('COMM_TOTAL')
 
 !$OMP parallel do default(none) shared(is,ie,js,je,kmax,pm,rf_cutoff,w,rf,u,v, &
-!$OMP                                  u00,v00, flagstruct, &
+!$OMP                                  u00,v00,is_ideal_case, &
 !$OMP                                  conserve,hydrostatic,pt,ua,va,u2f,cp,rg,ptop,rcv)
      do k=1,kmax
         if ( pm(k) < rf_cutoff ) then
-           if (flagstruct%is_ideal_case) then
+           if (is_ideal_case) then
               if (.not. hydrostatic) then
                  do j=js,je
                     do i=is,ie

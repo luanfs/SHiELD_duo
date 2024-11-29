@@ -185,11 +185,6 @@ module fv_control_mod
 
      logical , pointer :: inline_q
      logical , pointer :: duogrid
-     integer, pointer :: duogrid_scheme
-     integer , pointer :: adv_scheme
-     integer , pointer :: mass_fixer
-     logical , pointer :: midpoint_cube
-
      real , pointer :: shift_fac
      logical , pointer :: do_schmidt, do_cube_transform
      real(kind=R_GRID) , pointer :: stretch_fac
@@ -552,8 +547,7 @@ module fv_control_mod
           Atm(this_grid)%flagstruct%grid_type,Atm(this_grid)%neststruct%nested, &
           Atm(this_grid)%layout,Atm(this_grid)%io_layout,Atm(this_grid)%bd,Atm(this_grid)%tile_of_mosaic, &
           Atm(this_grid)%gridstruct%square_domain,Atm(this_grid)%npes_per_tile,Atm(this_grid)%domain, &
-          Atm(this_grid)%domain_for_coupler,Atm(this_grid)%gridstruct%dg%domain_for_duo,&
-          Atm(this_grid)%gridstruct%dg%domain_for_duo2,Atm(this_grid)%domain_for_read,Atm(this_grid)%num_contact,Atm(this_grid)%pelist)
+          Atm(this_grid)%domain_for_coupler,Atm(this_grid)%gridstruct%dg%domain_for_duo,Atm(this_grid)%domain_for_read,Atm(this_grid)%num_contact,Atm(this_grid)%pelist)
      call broadcast_domains(Atm,Atm(this_grid)%pelist,size(Atm(this_grid)%pelist))
      do n=1,ngrids
         tile_id = mpp_get_tile_id(Atm(n)%domain)
@@ -746,10 +740,6 @@ module fv_control_mod
        warm_start                    => Atm%flagstruct%warm_start
        inline_q                      => Atm%flagstruct%inline_q
        duogrid                       => Atm%flagstruct%duogrid
-       duogrid_scheme                => Atm%flagstruct%duogrid_scheme
-       adv_scheme                    => Atm%flagstruct%adv_scheme
-       mass_fixer                    => Atm%flagstruct%mass_fixer
-       midpoint_cube                 => Atm%flagstruct%midpoint_cube
        shift_fac                     => Atm%flagstruct%shift_fac
        do_schmidt                    => Atm%flagstruct%do_schmidt
        do_cube_transform             => Atm%flagstruct%do_cube_transform
@@ -956,7 +946,6 @@ module fv_control_mod
             use_logp, p_fac, a_imp, k_split, n_split, m_split, q_split, print_freq, write_3d_diags, &
             do_schmidt, do_cube_transform, &
             hord_mt, hord_vt, hord_tm, hord_dp, hord_tr, shift_fac, stretch_fac, target_lat, target_lon, duogrid, &
-            duogrid_scheme, adv_scheme, mass_fixer, midpoint_cube, &
             kord_mt, kord_wz, kord_tm, kord_tr, remap_te, fv_debug, fv_land, consv_checker, &
             do_am4_remap, nudge, do_sat_adj, do_fast_phys, do_inline_mp, do_aerosol, do_f3d, &
             external_ic, read_increment, ncep_ic, nggps_ic, hrrrv3_ic, ecmwf_ic, use_new_ncep, use_ncep_phy, fv_diag_ic, &

@@ -29,7 +29,7 @@ module fv_grid_tools_mod
                            mid_pt_sphere, spherical_angle,     &
                                cell_center2, get_area, inner_prod, fill_ghost, &
                            direct_transform, cube_transform, dist2side_latlon, &
-                           spherical_linear_interpolation, big_number, gnomonic_grid_local_coords, metricterm, gnomonic_grid_b2acd, tgvector_norms
+                           spherical_linear_interpolation, big_number
   use fv_timing_mod,  only: timing_on, timing_off
   use fv_mp_mod,      only: is_master, fill_corners, XDir, YDir
   use fv_mp_mod,      only: grids_master_procs
@@ -483,22 +483,12 @@ contains
     real(kind=R_GRID), dimension(Atm%bd%js:Atm%bd%je) :: wbuffer, ebuffer
 
     real(kind=R_GRID), pointer, dimension(:,:,:) :: agrid, grid
-    real(kind=R_GRID), pointer, dimension(:,:,:) :: cgrid, dgrid
-    real(kind=R_GRID), pointer, dimension(:) :: line_a, line_b
-    real(kind=R_GRID), pointer, dimension(:) :: x_a, y_a
-    real(kind=R_GRID), pointer, dimension(:) :: x_b, y_b
-    real(kind=R_GRID), pointer, dimension(:) :: dx_cs, dy_cs, rdx_cs, rdy_cs
-    real(kind=R_GRID), pointer, dimension(:) :: dxa_cs, dya_cs, rdxa_cs, rdya_cs
     real(kind=R_GRID), pointer, dimension(:,:) :: area, area_c
-    real(kind=R_GRID) :: agrid_cube(2), aref, rref, dxcube, dycube, max_error
 
     real(kind=R_GRID), pointer, dimension(:,:) :: sina, cosa, dx, dy, dxc, dyc, dxa, dya
     real, pointer, dimension(:,:,:) :: e1, e2
 
     real, pointer, dimension(:,:) :: rarea, rarea_c
-    real, pointer, dimension(:,:) :: rmt_a, mt_a
-    real, pointer, dimension(:,:) :: rmt_b, mt_b
-    real, pointer, dimension(:,:) ::  mt_c, mt_d
     real, pointer, dimension(:,:) :: rdx, rdy, rdxc, rdyc, rdxa, rdya
 
     integer, pointer, dimension(:,:,:) ::  iinta, jinta, iintb, jintb
@@ -527,20 +517,6 @@ contains
     !!! Associate pointers
     agrid => Atm%gridstruct%agrid_64
     grid  => Atm%gridstruct%grid_64
-    cgrid => Atm%gridstruct%cgrid_64
-    dgrid => Atm%gridstruct%dgrid_64
-
-
-    line_a => Atm%gridstruct%line_a
-    line_b => Atm%gridstruct%line_b
-
-    mt_a  => Atm%gridstruct% metricterm_a
-    mt_b  => Atm%gridstruct% metricterm_b
-    mt_c  => Atm%gridstruct% metricterm_c
-    mt_d  => Atm%gridstruct% metricterm_d
-
-    rmt_a => Atm%gridstruct%rmetricterm_a
-    rmt_b => Atm%gridstruct%rmetricterm_b
 
      area   => Atm%gridstruct%area_64
     area_c  => Atm%gridstruct%area_c_64
@@ -564,16 +540,6 @@ contains
     e1     => Atm%gridstruct%e1
     e2     => Atm%gridstruct%e2
 
-     dxa_cs => Atm%gridstruct%dxa_cs
-    rdxa_cs => Atm%gridstruct%rdxa_cs
-     dya_cs => Atm%gridstruct%dya_cs
-    rdya_cs => Atm%gridstruct%rdya_cs
-
-     dx_cs => Atm%gridstruct%dx_cs
-    rdx_cs => Atm%gridstruct%rdx_cs
-     dy_cs => Atm%gridstruct%dy_cs
-    rdy_cs => Atm%gridstruct%rdy_cs
- 
     if (Atm%neststruct%nested .or. ANY(Atm%neststruct%child_grids)) then
         grid_global => Atm%grid_global
     else if( trim(grid_file) .NE. 'INPUT/grid_spec.nc') then
@@ -685,8 +651,8 @@ contains
 ! Shift the corner away from Japan
 !---------------------------------
 !--------------------- This will result in the corner close to east coast of China ------------------
-!                      if ( .not. ( Atm%flagstruct%do_schmidt .or. Atm%flagstruct%do_cube_transform) .and. (Atm%flagstruct%shift_fac)>1.E-4 )   &
-!                           grid_global(i,j,1,n) = grid_global(i,j,1,n) - pi/Atm%flagstruct%shift_fac
+                      if ( .not. ( Atm%flagstruct%do_schmidt .or. Atm%flagstruct%do_cube_transform) .and. (Atm%flagstruct%shift_fac)>1.E-4 )   &
+                           grid_global(i,j,1,n) = grid_global(i,j,1,n) - pi/Atm%flagstruct%shift_fac
 !----------------------------------------------------------------------------------------------------
                       if ( grid_global(i,j,1,n) < 0. )              &
                            grid_global(i,j,1,n) = grid_global(i,j,1,n) + 2.*pi
@@ -852,69 +818,17 @@ if (.not. Atm%flagstruct%duogrid)             call mpp_update_domains( agrid, At
                 call fill_corners(agrid(:,:,2), npx, npy, YDir, AGRID=.true.)
              endif
 
-            ! compute C and D grid points
              do j=jsd,jed
              do i=isd,ied
-                ! C grid
                 call mid_pt_sphere(grid(i,  j,1:2), grid(i,  j+1,1:2), p1)
                 call mid_pt_sphere(grid(i+1,j,1:2), grid(i+1,j+1,1:2), p2)
-                cgrid(i,j,1) = p1(1)
-                cgrid(i,j,2) = p1(2)
-                cgrid(i+1,j,1) = p2(1)
-                cgrid(i+1,j,2) = p2(2)
-
-                ! D grid
+                dxa(i,j) = great_circle_dist( p2, p1, radius )
+                !
                 call mid_pt_sphere(grid(i,j  ,1:2), grid(i+1,j  ,1:2), p1)
                 call mid_pt_sphere(grid(i,j+1,1:2), grid(i+1,j+1,1:2), p2)
-                dgrid(i,j,1) = p1(1)
-                dgrid(i,j,2) = p1(2)
-                dgrid(i,j+1,1) = p2(1)
-                dgrid(i,j+1,2) = p2(2)
+                dya(i,j) = great_circle_dist( p2, p1, radius )
              enddo
              enddo
-
-             do j=jsd,jed
-             do i=isd,ied
-                dxa(i,j) = great_circle_dist( cgrid(i,j,1:2), cgrid(i+1,j,1:2), radius)
-                dya(i,j) = great_circle_dist( dgrid(i,j,1:2), dgrid(i,j+1,1:2), radius )
-             enddo
-             enddo
-
-             ! modify the A/C/D grid points formulation
-             if (.not. stretched_grid .and. Atm%flagstruct%midpoint_cube) then
-               if (.not. Atm%flagstruct%duogrid) then
-                 do j=js,je
-                 do i=is,ie
-                   call gnomonic_grid_b2acd(Atm%flagstruct%grid_type, &
-                                    grid(i,j,1:2)  , grid(i,j+1,1:2),  &
-                                    grid(i+1,j,1:2), grid(i+1,j+1,1:2),  &
-                                    agrid(i,j,1:2) , agrid_cube(1:2),&
-                                    cgrid(i,j,1:2) , cgrid(i+1,j,1:2), &
-                                    dgrid(i,j,1:2) , dgrid(i,j+1,1:2))
-                   agrid(i,j,1:2) = agrid_cube(1:2)
-                 enddo
-                 enddo
-               else
-                 ! get A, C and D grids from duogrid
-                 do j=jsd,ied
-                 do i=isd,jed
-                     agrid(i,j,1) = Atm%gridstruct%dg%a_pt(1,i,j)
-                     agrid(i,j,2) = Atm%gridstruct%dg%a_pt(2,i,j)
-
-                     cgrid(i,j,1) = Atm%gridstruct%dg%c_pt(1,i,j)
-                     cgrid(i,j,2) = Atm%gridstruct%dg%c_pt(2,i,j)
-                     cgrid(i+1,j,1) = Atm%gridstruct%dg%c_pt(1,i+1,j)
-                     cgrid(i+1,j,2) = Atm%gridstruct%dg%c_pt(2,i+1,j)
-
-                     dgrid(i,j,1) = Atm%gridstruct%dg%d_pt(1,i,j)
-                     dgrid(i,j,2) = Atm%gridstruct%dg%d_pt(2,i,j)
-                     dgrid(i,j+1,1) = Atm%gridstruct%dg%d_pt(1,i,j+1)
-                     dgrid(i,j+1,2) = Atm%gridstruct%dg%d_pt(2,i,j+1)
- 
-                 enddo
-                 enddo
-               endif
-             endif
 !      call mpp_update_domains( dxa, dya, Atm%domain, flags=SCALAR_PAIR, gridtype=AGRID_PARAM)
              if (cubed_sphere  .and. (.not. (Atm%gridstruct%bounded_domain))) then
                 call fill_corners(dxa, dya, npx, npy, AGRID=.true.)
@@ -922,136 +836,6 @@ if (.not. Atm%flagstruct%duogrid)             call mpp_update_domains( agrid, At
 
 
           end if !if nested
-
-
-
-         ! let us get the local coordinates
-         call gnomonic_grid_local_coords(Atm%flagstruct%grid_type, Atm%flagstruct%duogrid, Atm%bd, agrid, grid, line_a, line_b)
-
-         if(Atm%flagstruct%grid_type==0)then
-            aref = dasin(1.d0/dsqrt(3.d0))
-            rref = dsqrt(2.d0)
-         else if(Atm%flagstruct%grid_type==2)then
-            aref = pi*0.25d0
-            rref = 1.d0
-         endif
-
-         dxcube = 2.d0*aref/(npx-1)
-         dycube = 2.d0*aref/(npy-1)
-
-         allocate(x_b(isd:ied+1))
-         allocate(y_b(jsd:jed+1))
-         allocate(x_a(isd:ied))
-         allocate(y_a(jsd:jed))
- 
-         do i = isd, ied+1
-            x_b(i) = -aref + dxcube*(i-1)
-         enddo
-
-         do j = jsd, jed+1
-            y_b(j) = -aref + dycube*(j-1)
-         enddo
-
-         do i = isd, ied
-            x_a(i) = (x_b(i+1) + x_b(i))*0.5d0
-         enddo
-
-         do j = jsd, jed
-            y_a(j) = (y_b(j+1) + y_b(j))*0.5d0
-         enddo
- 
-         if(is==1) then
-            do i = isd,is-1
-               x_b(i) = datan(dtan( -pi*0.5-datan(rref*dtan(x_b(is+1-i))  ))/rref)
-            enddo
-            do i = isd,is-1
-               x_a(i) = datan(dtan( -pi*0.5-datan(rref*dtan(x_a(is-i))  ))/rref)
-            enddo
-         endif
-
-         if(js==1) then
-            do j = jsd,js-1
-               y_b(j) = datan(dtan( -pi*0.5-datan(rref*dtan(y_b(js+1-j))  ))/rref)
-            enddo
-            do j = jsd,js-1
-               y_a(j) = datan(dtan( -pi*0.5-datan(rref*dtan(y_a(js-j))  ))/rref)
-            enddo
-         endif
-
-         if(ie+1==npx) then
-            do i = ie+2,ied+1
-               x_b(i) = datan(dtan( -pi*0.5-datan(rref*dtan(x_b(ie+2-(i-ie)))  ))/rref)
-            enddo
-            do i = ie+1,ied
-               x_a(i) = datan(dtan( -pi*0.5-datan(rref*dtan(x_a(ie+1-(i-ie)))  ))/rref)
-            enddo
-         endif
-
-         if(je+1==npy) then
-            do j = je+2,jed+1
-               y_b(j) = datan(dtan( -pi*0.5-datan(rref*dtan(y_b(je+2-(j-je)))  ))/rref)
-            enddo
-            do j = je+1,jed
-               y_a(j) = datan(dtan( -pi*0.5-datan(rref*dtan(y_a(je+1-(j-je)))  ))/rref)
-            enddo
-         endif
- 
-         do i = isd, ied
-            dxa_cs(i)  = x_b(i+1) - x_b(i)
-            rdxa_cs(i) = 1.d0/dxa_cs(i)
-            !if(mpp_pe()==0) print*, dxa_cs(i), dxcube
-         enddo
-
-         do j = jsd, jed
-            dya_cs(j)  = y_b(j+1) - y_b(j)
-            rdya_cs(j) = 1.d0/dya_cs(j)
-            !if(mpp_pe()==0) print*, dya_cs(j), dycube
-         enddo
- 
-         do i = isd+1, ied-1
-            dx_cs(i) = x_a(i)-x_a(i-1)
-            rdx_cs(i) = 1.d0/dx_cs(i)
-         enddo
-
-         do j = jsd+1, jed-1
-            dy_cs(j) = y_a(j)-y_a(j-1)
-            rdy_cs(j) = 1.d0/dy_cs(j)
-         enddo
- 
-         ! compute metric term
-         !A grid
-         do j = jsd, jed
-            do i = isd, ied
-               !call metricterm(Atm%flagstruct%grid_type, line_a(i), line_a(j), mt_a(i,j), radius)
-               call metricterm(Atm%flagstruct%grid_type, x_a(i), y_a(j), mt_a(i,j), radius)
-               rmt_a(i,j) = 1.d0/mt_a(i,j)
-            enddo
-         enddo
-
-         !B grid
-         do j = jsd, jed+1
-            do i = isd, ied+1
-               !call metricterm(Atm%flagstruct%grid_type, line_b(i), line_b(j), mt_b(i,j), radius)
-               call metricterm(Atm%flagstruct%grid_type, x_b(i), y_b(j), mt_b(i,j), radius)
-               rmt_b(i,j) = 1.d0/mt_b(i,j)
-            enddo
-         enddo
-
-         !C grid
-         do j = jsd, jed
-            do i = isd, ied+1
-               !call metricterm(Atm%flagstruct%grid_type, line_b(i), line_a(j), mt_c(i,j), radius)
-               call metricterm(Atm%flagstruct%grid_type, x_b(i), y_a(j), mt_c(i,j), radius)
-            enddo
-         enddo
-
-         !D grid
-         do j = jsd, jed+1
-            do i = isd, ied
-               !call metricterm(Atm%flagstruct%grid_type, line_a(i), line_b(j), mt_d(i,j), radius)
-               call metricterm(Atm%flagstruct%grid_type, x_a(i), y_b(j), mt_d(i,j), radius)
-            enddo
-         enddo
 
 
 !       do j=js,je
@@ -1090,65 +874,9 @@ if (.not. Atm%flagstruct%duogrid)             call mpp_update_domains( agrid, At
        call grid_area( npx, npy, ndims, nregions, Atm%gridstruct%bounded_domain, Atm%gridstruct, Atm%domain, Atm%bd )
 !      stretched_grid = .false.
 
-       !B grid
-       do j = jsd, jed+1
-          do i = isd, ied+1
-             !call tgvector_norms(Atm%flagstruct%grid_type, line_b(i), line_b(j),&
-             call tgvector_norms(Atm%flagstruct%grid_type, x_b(i), y_b(j),&
-             Atm%gridstruct%norm_tgx_b(i,j), Atm%gridstruct%norm_tgy_b(i,j), radius)
-             Atm%gridstruct%rnorm_tgx_b(i,j) = 1.d0/Atm%gridstruct%norm_tgx_b(i,j)
-             Atm%gridstruct%rnorm_tgy_b(i,j) = 1.d0/Atm%gridstruct%norm_tgy_b(i,j)
-          enddo
-       enddo
-
-
-       !C grid
-       do j = jsd, jed
-          do i = isd, ied+1
-             !call tgvector_norms(Atm%flagstruct%grid_type, line_b(i), line_a(j),&
-             call tgvector_norms(Atm%flagstruct%grid_type, x_b(i), y_a(j),&
-             Atm%gridstruct%norm_tgx_c(i,j), Atm%gridstruct%norm_tgy_c(i,j), radius)
-             Atm%gridstruct%rnorm_tgx_c(i,j) = 1.d0/Atm%gridstruct%norm_tgx_c(i,j)
-             Atm%gridstruct%rnorm_tgy_c(i,j) = 1.d0/Atm%gridstruct%norm_tgy_c(i,j)
-          enddo
-       enddo
-
-       !D grid
-       do j = jsd, jed+1
-          do i = isd, ied
-             !call tgvector_norms(Atm%flagstruct%grid_type, line_a(i), line_b(j),&
-             call tgvector_norms(Atm%flagstruct%grid_type, x_a(i), y_b(j),&
-             Atm%gridstruct%norm_tgx_d(i,j), Atm%gridstruct%norm_tgy_d(i,j), radius)
-             Atm%gridstruct%rnorm_tgx_d(i,j) = 1.d0/Atm%gridstruct%norm_tgx_d(i,j)
-             Atm%gridstruct%rnorm_tgy_d(i,j) = 1.d0/Atm%gridstruct%norm_tgy_d(i,j)
-          enddo
-       enddo
- 
-       deallocate(x_a,y_a,x_b,y_b)
-
-if (mpp_pe() == mpp_root_pe()) then
-   !B grid lengths
-   max_error = 0.d0
-   do i = is, ie
-      do j = js, je+1
-         max_error = max(max_error, abs(dx(i,j)-Atm%gridstruct%norm_tgx_d(i,j)*Atm%gridstruct%dxa_cs(i)))
-      enddo
-   !   if(mpp_pe()==0) print*, i,atm%gridstruct%dx_cs(i)
-   enddo
-   do i = is, ie+1
-      do j = js, je
-         max_error = max(max_error, abs(dy(i,j)-Atm%gridstruct%norm_tgy_c(i,j)*Atm%gridstruct%dya_cs(j)))
-     enddo
-   enddo
-   !print*, max_error
-endif
-!stop
-
-
 !----------------------------------
 ! Compute area_c, rarea_c, dxc, dyc
 !----------------------------------
-!-----------------
   if ( .not. stretched_grid .and. (.not. (Atm%gridstruct%bounded_domain))) then
 ! For symmetrical grids:
        if ( is==1 ) then
@@ -1214,6 +942,7 @@ endif
 
    endif
 !-----------------
+
 if (.not. Atm%flagstruct%duogrid)       call mpp_update_domains( dxc, dyc, Atm%domain, flags=SCALAR_PAIR,   &
                                 gridtype=CGRID_NE_PARAM, complete=.true.)
        if (cubed_sphere  .and. (.not. (Atm%gridstruct%bounded_domain))) then

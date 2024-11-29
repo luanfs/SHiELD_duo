@@ -37,7 +37,7 @@ module fv_restart_mod
                                  remap_restart, fv_io_write_BCs, fv_io_read_BCs
   use fv_grid_utils_mod,   only: ptop_min, fill_ghost, g_sum, &
                                  make_eta_level, cubed_to_latlon, great_circle_dist
-  use fv_diagnostics_mod,  only: prt_maxmin, gn
+  use fv_diagnostics_mod,  only: prt_maxmin
   use init_hydro_mod,      only: p_var
   use mpp_domains_mod,     only: mpp_update_domains, domain2d, DGRID_NE
   use mpp_domains_mod,     only: mpp_get_compute_domain, mpp_get_data_domain, mpp_get_global_domain
@@ -48,6 +48,7 @@ module fv_restart_mod
   use mpp_mod,             only: mpp_get_current_pelist, mpp_npes, mpp_set_current_pelist
   use mpp_mod,             only: mpp_send, mpp_recv, mpp_sync_self, mpp_pe, mpp_sync
   use fms2_io_mod,         only: file_exists, set_filename_appendix, FmsNetcdfFile_t, open_file, close_file
+  use fms_io_mod,          only: fmsset_filename_appendix=> set_filename_appendix
   use test_cases_mod,      only: alpha, init_case, init_double_periodic!, init_latlon
   use fv_mp_mod,           only: is_master, mp_reduce_min, mp_reduce_max, corners_YDir => YDir, fill_corners, tile_fine, global_nest_domain
   use fv_surf_map_mod,     only: sgh_g, oro_g
@@ -61,6 +62,7 @@ module fv_restart_mod
   use fv_treat_da_inc_mod, only: read_da_inc
   use fv_regional_mod,     only: write_full_fields
   use coarse_grained_restart_files_mod, only: fv_io_write_restart_coarse
+  use duogrid_mod,        only: ext_scalar
 
   implicit none
   private
@@ -201,6 +203,7 @@ contains
        if (Atm(n)%neststruct%nested .and. n==this_grid) then
           write(gnn,'(A4, I2.2)') "nest", Atm(n)%grid_number
           call set_filename_appendix(gnn)
+          call fmsset_filename_appendix(gnn)
        endif
 
        !3preN. Topography BCs for nest, including setup for blending
@@ -257,7 +260,6 @@ contains
 
           !3. External_ic
           if (Atm(n)%flagstruct%external_ic) then
-
              if( is_master() ) write(*,*) 'Calling get_external_ic'
              call get_external_ic(Atm(n), .not. do_read_restart)
              if( is_master() ) write(*,*) 'IC generated from the specified external source'
@@ -323,14 +325,6 @@ contains
                       if ( is_master() ) write(*,*) 'Warning !!! del-4 terrain filter has been applied ', &
                            Atm(n)%flagstruct%n_zs_filter, ' times'
                    endif
-                   if ( Atm(n)%flagstruct%fv_land .and. allocated(sgh_g) .and. allocated(oro_g) ) then
-                      do j=jsc,jec
-                         do i=isc,iec
-                            Atm(n)%sgh(i,j) = sgh_g(i,j)
-                            Atm(n)%oro(i,j) = oro_g(i,j)
-                         enddo
-                      enddo
-                   endif
                 endif
                 call mpp_update_domains( Atm(n)%phis, Atm(n)%domain, complete=.true. )
              else
@@ -338,8 +332,10 @@ contains
                 if( is_master() ) write(*,*) 'phis set to zero'
              endif !mountain
 
+
+
              !5. Idealized test case
-          elseif (Atm(n)%flagstruct%is_ideal_case) then
+          else
 
              ideal_test_case(n) = 1
 
@@ -353,10 +349,7 @@ contains
                    call init_case(Atm(n)%u,Atm(n)%v,Atm(n)%w,Atm(n)%pt,Atm(n)%delp,Atm(n)%q, &
                         Atm(n)%phis, Atm(n)%ps,Atm(n)%pe, Atm(n)%peln,Atm(n)%pk,Atm(n)%pkz, &
                         Atm(n)%uc,Atm(n)%vc, Atm(n)%ua,Atm(n)%va,        &
-                        Atm(n)%ak, Atm(n)%bk, &
-                        Atm(n)%forcing_uc, Atm(n)%forcing_vc, Atm(n)%forcing_ud, Atm(n)%forcing_vd, &
-                        Atm(n)%forcing_delp, &
-                        Atm(n)%gridstruct, Atm(n)%flagstruct,&
+                        Atm(n)%ak, Atm(n)%bk, Atm(n)%gridstruct, Atm(n)%flagstruct,&
                         Atm(n)%npx, Atm(n)%npy, npz, Atm(n)%ng, &
                         ncnst, Atm(n)%flagstruct%nwat,  &
                         Atm(n)%flagstruct%ndims, Atm(n)%flagstruct%ntiles, &
@@ -388,7 +381,7 @@ contains
 
              !Turn this off on the nested grid if you are just interpolating topography from the coarse grid!
              !These parameters are needed in LM3/LM4, and are communicated through restart files
-             if ( Atm(n)%flagstruct%fv_land  .and. allocated(sgh_g) .and. allocated(oro_g)) then
+             if ( Atm(n)%flagstruct%fv_land ) then
                 do j=jsc,jec
                    do i=isc,iec
                       Atm(n)%sgh(i,j) = sgh_g(i,j)
@@ -396,13 +389,6 @@ contains
                    enddo
                 enddo
              endif
-
-             Atm(n)%u0 = Atm(n)%u
-             Atm(n)%v0 = Atm(n)%v
-
-          else
-
-                call mpp_error(FATAL, "If there is no restart file, either external_ic or is_ideal_case must be set true.")
 
           endif !external_ic vs. restart vs. idealized
 
@@ -582,7 +568,11 @@ contains
                 enddo
              enddo
           endif
-          call mpp_update_domains( Atm(n)%gridstruct%f0, Atm(n)%domain )
+          if (.not. Atm(n)%gridstruct%dg%is_initialized) then
+              call mpp_update_domains( Atm(n)%gridstruct%f0, Atm(n)%domain )
+          else
+            call ext_scalar(Atm(n)%gridstruct%f0, Atm(n)%gridstruct%dg, Atm(n)%bd, Atm(n)%domain, 0, 0)
+          endif
           if ( Atm(n)%gridstruct%cubed_sphere .and. (.not. Atm(n)%gridstruct%bounded_domain))then
              call fill_corners(Atm(n)%gridstruct%f0, Atm(n)%npx, Atm(n)%npy, Corners_YDir)
           endif
@@ -696,16 +686,8 @@ contains
                         1., Atm(n)%gridstruct%area_64, Atm(n)%domain)
       enddo
 #endif
-      call prt_maxmin('U (local) ', Atm(n)%u(isc:iec,jsc:jec,1:npz), isc, iec, jsc, jec, 0, npz, 1.)
-      call prt_maxmin('V (local) ', Atm(n)%v(isc:iec,jsc:jec,1:npz), isc, iec, jsc, jec, 0, npz, 1.)
-      ! compute ua, va
-      call cubed_to_latlon(Atm(n)%u, Atm(n)%v, Atm(n)%ua, Atm(n)%va, &
-           Atm(n)%gridstruct, Atm(n)%flagstruct, &
-           Atm(n)%npx, Atm(n)%npy, npz, 1, &
-           Atm(n)%gridstruct%grid_type, Atm(n)%domain, &
-           Atm(n)%gridstruct%bounded_domain, Atm(n)%flagstruct%c2l_ord, Atm(n)%bd)
-      call prt_maxmin('UA ', Atm(n)%ua, isc, iec, jsc, jec, Atm(n)%ng, npz, 1.)
-      call prt_maxmin('VA ', Atm(n)%va, isc, iec, jsc, jec, Atm(n)%ng, npz, 1.)
+      call prt_maxmin('U ', Atm(n)%u(isc:iec,jsc:jec,1:npz), isc, iec, jsc, jec, 0, npz, 1.)
+      call prt_maxmin('V ', Atm(n)%v(isc:iec,jsc:jec,1:npz), isc, iec, jsc, jec, 0, npz, 1.)
 
       if ( (.not.Atm(n)%flagstruct%hydrostatic) .and. Atm(n)%flagstruct%make_nh ) then
          call mpp_error(NOTE, "  Initializing w to 0")
@@ -802,7 +784,6 @@ contains
          isd_p,  ied_p,  jsd_p,  jed_p  )
 
     allocate(g_dat( isg:ieg, jsg:jeg, 1) )
-
     call timing_on('COMM_TOTAL')
 
     !!! FIXME: For whatever reason this code CRASHES if the lower-left corner
@@ -829,7 +810,6 @@ contains
     endif
 
     call timing_off('COMM_TOTAL')
-
     if (process) call fill_nested_grid(Atm%phis, g_dat(isg:,jsg:,1), &
          Atm%neststruct%ind_h, Atm%neststruct%wt_h, &
          0, 0,  isg, ieg, jsg, jeg, Atm%bd)
@@ -903,23 +883,22 @@ contains
     call timing_on('COMM_TOTAL')
 
     !Call mpp_global_field on the procs that have the required data.
-    !Then broadcast from the head PE to the receiving PEs
-    if (Atm(1)%neststruct%parent_proc .and. Atm(1)%neststruct%parent_tile == Atm(1)%parent_grid%global_tile) then
-       call mpp_global_field( &
-            Atm(1)%parent_grid%domain, &
-            Atm(1)%parent_grid%delp(isd_p:ied_p,jsd_p:jed_p,:), g_dat, position=CENTER)
-       if (gid == sending_proc) then !crazy logic but what we have for now
-          do p=1,size(Atm(1)%pelist)
-             call mpp_send(g_dat,size(g_dat),Atm(1)%pelist(p))
-          enddo
+       !Then broadcast from the head PE to the receiving PEs
+       if (Atm(1)%neststruct%parent_proc .and. Atm(1)%neststruct%parent_tile == Atm(1)%parent_grid%global_tile) then
+          call mpp_global_field( &
+               Atm(1)%parent_grid%domain, &
+               Atm(1)%parent_grid%delp(isd_p:ied_p,jsd_p:jed_p,:), g_dat, position=CENTER)
+          if (gid == sending_proc) then !crazy logic but what we have for now
+             do p=1,size(Atm(1)%pelist)
+                call mpp_send(g_dat,size(g_dat),Atm(1)%pelist(p))
+             enddo
+          endif
        endif
-    endif
-    if (ANY(Atm(1)%pelist == gid)) then
-       call mpp_recv(g_dat, size(g_dat), sending_proc)
-    endif
+       if (ANY(Atm(1)%pelist == gid)) then
+          call mpp_recv(g_dat, size(g_dat), sending_proc)
+       endif
 
     call timing_off('COMM_TOTAL')
-
     if (process) call fill_nested_grid(Atm(1)%delp, g_dat, &
          Atm(1)%neststruct%ind_h, Atm(1)%neststruct%wt_h, &
          0, 0,  isg, ieg, jsg, jeg, npz, Atm(1)%bd)
@@ -931,27 +910,26 @@ contains
 
        call timing_on('COMM_TOTAL')
 
-       if (ANY(Atm(1)%parent_grid%pelist == gid) .and. Atm(1)%neststruct%parent_tile == Atm(1)%parent_grid%global_tile) then
-          call mpp_global_field( &
-            Atm(1)%parent_grid%domain, &
-            Atm(1)%parent_grid%q(isd_p:ied_p,jsd_p:jed_p,:,nq), g_dat, position=CENTER)
-          if (gid == sending_proc) then
-             do p=1,size(Atm(1)%pelist)
-                call mpp_send(g_dat,size(g_dat),Atm(1)%pelist(p))
-             enddo
+          if (ANY(Atm(1)%parent_grid%pelist == gid) .and. Atm(1)%neststruct%parent_tile == Atm(1)%parent_grid%global_tile) then
+             call mpp_global_field( &
+               Atm(1)%parent_grid%domain, &
+               Atm(1)%parent_grid%q(isd_p:ied_p,jsd_p:jed_p,:,nq), g_dat, position=CENTER)
+             if (gid == sending_proc) then
+                do p=1,size(Atm(1)%pelist)
+                   call mpp_send(g_dat,size(g_dat),Atm(1)%pelist(p))
+                enddo
+             endif
           endif
-       endif
-       if (ANY(Atm(1)%pelist == gid)) then
-          call mpp_recv(g_dat, size(g_dat), sending_proc)
-       endif
+          if (ANY(Atm(1)%pelist == gid)) then
+             call mpp_recv(g_dat, size(g_dat), sending_proc)
+          endif
 
        call timing_off('COMM_TOTAL')
-
        if (process) call fill_nested_grid(Atm(1)%q(isd:ied,jsd:jed,:,nq), g_dat, &
             Atm(1)%neststruct%ind_h, Atm(1)%neststruct%wt_h, &
             0, 0,  isg, ieg, jsg, jeg, npz, Atm(1)%bd)
 
-       call mpp_sync_self
+    call mpp_sync_self
 
     end do
 
@@ -964,24 +942,23 @@ contains
 
     call timing_on('COMM_TOTAL')
 
-    if (ANY(Atm(1)%parent_grid%pelist == gid) .and. Atm(1)%neststruct%parent_tile == Atm(1)%parent_grid%global_tile) then
-          call mpp_global_field( &
-            Atm(1)%parent_grid%domain, &
-            Atm(1)%parent_grid%pt(isd_p:ied_p,jsd_p:jed_p,:), g_dat, position=CENTER)
-       if (gid == sending_proc) then
-          do p=1,size(Atm(1)%pelist)
-             call mpp_send(g_dat,size(g_dat),Atm(1)%pelist(p))
-          enddo
+       if (ANY(Atm(1)%parent_grid%pelist == gid) .and. Atm(1)%neststruct%parent_tile == Atm(1)%parent_grid%global_tile) then
+             call mpp_global_field( &
+               Atm(1)%parent_grid%domain, &
+               Atm(1)%parent_grid%pt(isd_p:ied_p,jsd_p:jed_p,:), g_dat, position=CENTER)
+          if (gid == sending_proc) then
+             do p=1,size(Atm(1)%pelist)
+                call mpp_send(g_dat,size(g_dat),Atm(1)%pelist(p))
+             enddo
+          endif
        endif
-    endif
-    if (ANY(Atm(1)%pelist == gid)) then
-       call mpp_recv(g_dat, size(g_dat), sending_proc)
-    endif
+       if (ANY(Atm(1)%pelist == gid)) then
+          call mpp_recv(g_dat, size(g_dat), sending_proc)
+       endif
 
     call mpp_sync_self
 
     call timing_off('COMM_TOTAL')
-
     if (process) call fill_nested_grid(Atm(1)%pt, g_dat, &
          Atm(1)%neststruct%ind_h, Atm(1)%neststruct%wt_h, &
          0, 0,  isg, ieg, jsg, jeg, npz, Atm(1)%bd)
@@ -1000,24 +977,23 @@ contains
 
     call timing_on('COMM_TOTAL')
 
-    if (ANY(Atm(1)%parent_grid%pelist == gid) .and. Atm(1)%neststruct%parent_tile == Atm(1)%parent_grid%global_tile) then
-          call mpp_global_field( &
-            Atm(1)%parent_grid%domain, &
-            Atm(1)%parent_grid%pkz(isc_p:iec_p,jsc_p:jec_p,:), g_dat, position=CENTER)
-       if (gid == sending_proc) then
-          do p=1,size(Atm(1)%pelist)
-             call mpp_send(g_dat,size(g_dat),Atm(1)%pelist(p))
-          enddo
+       if (ANY(Atm(1)%parent_grid%pelist == gid) .and. Atm(1)%neststruct%parent_tile == Atm(1)%parent_grid%global_tile) then
+             call mpp_global_field( &
+               Atm(1)%parent_grid%domain, &
+               Atm(1)%parent_grid%pkz(isc_p:iec_p,jsc_p:jec_p,:), g_dat, position=CENTER)
+          if (gid == sending_proc) then
+             do p=1,size(Atm(1)%pelist)
+                call mpp_send(g_dat,size(g_dat),Atm(1)%pelist(p))
+             enddo
+          endif
        endif
-    endif
-    if (ANY(Atm(1)%pelist == gid)) then
-       call mpp_recv(g_dat, size(g_dat), sending_proc)
-    endif
+       if (ANY(Atm(1)%pelist == gid)) then
+          call mpp_recv(g_dat, size(g_dat), sending_proc)
+       endif
 
     call mpp_sync_self
 
     call timing_off('COMM_TOTAL')
-
     if (process) then
        allocate(pt_coarse(isd:ied,jsd:jed,npz))
        call fill_nested_grid(pt_coarse, g_dat, &
@@ -1095,24 +1071,23 @@ contains
        !delz
        call timing_on('COMM_TOTAL')
 
-       if (ANY(Atm(1)%parent_grid%pelist == gid) .and. Atm(1)%neststruct%parent_tile == Atm(1)%parent_grid%global_tile) then
-          call mpp_global_field( &
-            Atm(1)%parent_grid%domain, &
-            Atm(1)%parent_grid%delz(isd_p:ied_p,jsd_p:jed_p,:), g_dat, position=CENTER)
-          if (gid == sending_proc) then
-             do p=1,size(Atm(1)%pelist)
-                call mpp_send(g_dat,size(g_dat),Atm(1)%pelist(p))
-             enddo
+          if (ANY(Atm(1)%parent_grid%pelist == gid) .and. Atm(1)%neststruct%parent_tile == Atm(1)%parent_grid%global_tile) then
+             call mpp_global_field( &
+               Atm(1)%parent_grid%domain, &
+               Atm(1)%parent_grid%delz(isd_p:ied_p,jsd_p:jed_p,:), g_dat, position=CENTER)
+             if (gid == sending_proc) then
+                do p=1,size(Atm(1)%pelist)
+                   call mpp_send(g_dat,size(g_dat),Atm(1)%pelist(p))
+                enddo
+             endif
           endif
-       endif
-       if (ANY(Atm(1)%pelist == gid)) then
-          call mpp_recv(g_dat, size(g_dat), sending_proc)
-       endif
+          if (ANY(Atm(1)%pelist == gid)) then
+             call mpp_recv(g_dat, size(g_dat), sending_proc)
+          endif
 
-       call mpp_sync_self
+    call mpp_sync_self
 
        call timing_off('COMM_TOTAL')
-
        if (process) call fill_nested_grid(Atm(1)%delz, g_dat, &
             Atm(1)%neststruct%ind_h, Atm(1)%neststruct%wt_h, &
             0, 0,  isg, ieg, jsg, jeg, npz, Atm(1)%bd)
@@ -1121,24 +1096,23 @@ contains
 
        call timing_on('COMM_TOTAL')
 
-       if (ANY(Atm(1)%parent_grid%pelist == gid) .and. Atm(1)%neststruct%parent_tile == Atm(1)%parent_grid%global_tile) then
-          call mpp_global_field( &
-            Atm(1)%parent_grid%domain, &
-            Atm(1)%parent_grid%w(isd_p:ied_p,jsd_p:jed_p,:), g_dat, position=CENTER)
-          if (gid == sending_proc) then
-             do p=1,size(Atm(1)%pelist)
-                call mpp_send(g_dat,size(g_dat),Atm(1)%pelist(p))
-             enddo
+          if (ANY(Atm(1)%parent_grid%pelist == gid) .and. Atm(1)%neststruct%parent_tile == Atm(1)%parent_grid%global_tile) then
+             call mpp_global_field( &
+               Atm(1)%parent_grid%domain, &
+               Atm(1)%parent_grid%w(isd_p:ied_p,jsd_p:jed_p,:), g_dat, position=CENTER)
+             if (gid == sending_proc) then
+                do p=1,size(Atm(1)%pelist)
+                   call mpp_send(g_dat,size(g_dat),Atm(1)%pelist(p))
+                enddo
+             endif
           endif
-       endif
-       if (ANY(Atm(1)%pelist == gid)) then
-          call mpp_recv(g_dat, size(g_dat), sending_proc)
-       endif
+          if (ANY(Atm(1)%pelist == gid)) then
+             call mpp_recv(g_dat, size(g_dat), sending_proc)
+          endif
 
-       call mpp_sync_self
+    call mpp_sync_self
 
        call timing_off('COMM_TOTAL')
-
        if (process) call fill_nested_grid(Atm(1)%w, g_dat, &
             Atm(1)%neststruct%ind_h, Atm(1)%neststruct%wt_h, &
             0, 0,  isg, ieg, jsg, jeg, npz, Atm(1)%bd)
@@ -1156,24 +1130,23 @@ contains
 
     call timing_on('COMM_TOTAL')
 
-    if (ANY(Atm(1)%parent_grid%pelist == gid) .and. Atm(1)%neststruct%parent_tile == Atm(1)%parent_grid%global_tile) then
-          call mpp_global_field( &
-            Atm(1)%parent_grid%domain, &
-            Atm(1)%parent_grid%u(isd_p:ied_p,jsd_p:jed_p+1,:), g_dat, position=NORTH)
-       if (gid == sending_proc) then
-          do p=1,size(Atm(1)%pelist)
-             call mpp_send(g_dat,size(g_dat),Atm(1)%pelist(p))
-          enddo
+       if (ANY(Atm(1)%parent_grid%pelist == gid) .and. Atm(1)%neststruct%parent_tile == Atm(1)%parent_grid%global_tile) then
+             call mpp_global_field( &
+               Atm(1)%parent_grid%domain, &
+               Atm(1)%parent_grid%u(isd_p:ied_p,jsd_p:jed_p+1,:), g_dat, position=NORTH)
+          if (gid == sending_proc) then
+             do p=1,size(Atm(1)%pelist)
+                call mpp_send(g_dat,size(g_dat),Atm(1)%pelist(p))
+             enddo
+          endif
        endif
-    endif
-    if (ANY(Atm(1)%pelist == gid)) then
-       call mpp_recv(g_dat, size(g_dat), sending_proc)
-    endif
+       if (ANY(Atm(1)%pelist == gid)) then
+          call mpp_recv(g_dat, size(g_dat), sending_proc)
+       endif
 
     call mpp_sync_self
 
     call timing_off('COMM_TOTAL')
-
     call mpp_sync_self
     if (process) call fill_nested_grid(Atm(1)%u, g_dat, &
          Atm(1)%neststruct%ind_u, Atm(1)%neststruct%wt_u, &
@@ -1187,23 +1160,22 @@ contains
 
     call timing_on('COMM_TOTAL')
 
-    if (ANY(Atm(1)%parent_grid%pelist == gid) .and. Atm(1)%neststruct%parent_tile == Atm(1)%parent_grid%global_tile) then
-          call mpp_global_field( &
-            Atm(1)%parent_grid%domain, &
-            Atm(1)%parent_grid%v(isd_p:ied_p+1,jsd_p:jed_p,:), g_dat, position=EAST)
-       if (gid == sending_proc) then
-          do p=1,size(Atm(1)%pelist)
-             call mpp_send(g_dat,size(g_dat),Atm(1)%pelist(p))
-          enddo
+       if (ANY(Atm(1)%parent_grid%pelist == gid) .and. Atm(1)%neststruct%parent_tile == Atm(1)%parent_grid%global_tile) then
+             call mpp_global_field( &
+               Atm(1)%parent_grid%domain, &
+               Atm(1)%parent_grid%v(isd_p:ied_p+1,jsd_p:jed_p,:), g_dat, position=EAST)
+          if (gid == sending_proc) then
+             do p=1,size(Atm(1)%pelist)
+                call mpp_send(g_dat,size(g_dat),Atm(1)%pelist(p))
+             enddo
+          endif
        endif
-    endif
-    if (ANY(Atm(1)%pelist == gid)) then
-       call mpp_recv(g_dat, size(g_dat), sending_proc)
-    endif
+       if (ANY(Atm(1)%pelist == gid)) then
+          call mpp_recv(g_dat, size(g_dat), sending_proc)
+       endif
 
     call mpp_sync_self
-
-    call timing_off('COMM_TOTAL')
+                                      call timing_off('COMM_TOTAL')
 
     if (process) call fill_nested_grid(Atm(1)%v, g_dat, &
          Atm(1)%neststruct%ind_v, Atm(1)%neststruct%wt_v, &
@@ -1389,10 +1361,8 @@ contains
     call pmaxmn_g('ZS', Atm%phis, isc, iec, jsc, jec, 1, 1./grav, Atm%gridstruct%area_64, Atm%domain)
     call pmaxmn_g('PS ', Atm%ps,   isc, iec, jsc, jec, 1, 0.01   , Atm%gridstruct%area_64, Atm%domain)
     call prt_maxmin('PS*', Atm%ps, isc, iec, jsc, jec, Atm%ng, 1, 0.01)
-    call prt_maxmin('U (local) ', Atm%u(isc:iec,jsc:jec,1:npz), isc, iec, jsc, jec, 0, npz, 1.)
-    call prt_maxmin('V (local) ', Atm%v(isc:iec,jsc:jec,1:npz), isc, iec, jsc, jec, 0, npz, 1.)
-    call prt_maxmin('UA ', Atm%ua, isc, iec, jsc, jec, Atm%ng, npz, 1.)
-    call prt_maxmin('VA ', Atm%va, isc, iec, jsc, jec, Atm%ng, npz, 1.)
+    call prt_maxmin('U ', Atm%u(isd:ied,jsd:jed,1:npz), isc, iec, jsc, jec, Atm%ng, npz, 1.)
+    call prt_maxmin('V ', Atm%v(isd:ied,jsd:jed,1:npz), isc, iec, jsc, jec, Atm%ng, npz, 1.)
     if ( .not. Atm%flagstruct%hydrostatic )    &
          call prt_maxmin('W ', Atm%w , isc, iec, jsc, jec, Atm%ng, npz, 1.)
     call prt_maxmin('T ', Atm%pt, isc, iec, jsc, jec, Atm%ng, npz, 1.)
@@ -1446,9 +1416,6 @@ subroutine pmaxmn_g(qname, q, is, ie, js, je, km, fac, area, domain)
 !
       real qmin, qmax, gmean
       integer i,j,k
-      character(len=8) :: display_name
-
-      logical, SAVE :: first_time = .true.
 
       qmin = q(is,js,1)
       qmax = qmin
@@ -1472,12 +1439,7 @@ subroutine pmaxmn_g(qname, q, is, ie, js, je, km, fac, area, domain)
       call mp_reduce_max(qmax)
 
       gmean = g_sum(domain, q(is:ie,js:je,km), is, ie, js, je, 3, area, 1, .true.)
-
-      if(is_master()) then
-         j = min(len(trim(qname)),8)
-         display_name = qname(1:j)
-         write(6,*) display_name, trim(gn), qmax*fac, qmin*fac, gmean*fac
-      endif
+      if(is_master()) write(6,*) qname, qmax*fac, qmin*fac, gmean*fac
 
 end subroutine pmaxmn_g
 
