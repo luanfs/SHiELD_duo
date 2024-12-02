@@ -1,0 +1,11 @@
+SHiELD_SRC/test/CI/
+plot/__pycache__/
+SHiELD_SRC/GFDL_atmos_cubed_sphere/model/*.swp
+SHiELD_SRC/GFDL_atmos_cubed_sphere/model/*.swo
+SHiELD_SRC/GFDL_atmos_cubed_sphere/tools/*.swo
+SHiELD_SRC/GFDL_atmos_cubed_sphere/tools/*.swp
+*.swp
+*.swo
+*pycache__/
+*.out
+*stdout

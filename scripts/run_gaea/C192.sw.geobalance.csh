@@ -6,7 +6,7 @@
 #SBATCH --account=gfdl_w
 #SBATCH --time=1:00:00
 #SBATCH --cluster=c5
-#SBATCH --ntasks=128
+#SBATCH --nodes=10
 
 set BUILD_AREA = "/ncrc/home2/Luan.Santos/SHiELD_duo/SHiELD_build" 
 set SCRATCHROOT = "/gpfs/f5/gfdl_w/scratch/Luan.Santos"
@@ -17,17 +17,19 @@ set SCRIPT_AREA = /ncrc/home2/Luan.Santos/SHiELD_duo/SHiELD_build
 
 ##################################################################################
 # Simulation parameters
-set adv=2             # 1-Putman and Lin 2007 scheme; 2-LT2
+set testcase="2"
+set adv=1             # 1-Putman and Lin 2007 scheme; 2-LT2
 set dg=1              # duogrid (always 1)
-set gtype=2           # grid type(0-equiedge; 2-equiangular)
-set hord=5            # PPM scheme
+set gtype=0           # grid type(0-equiedge; 2-equiangular)
+set hord=8            # PPM scheme
 set N=96              # N
 
 set dt_atmos="1800"   # atmos time step
 set n_split="7"       # 
 set div_damp=0.12     # divergence damping coefficient
 set dgflag=".true."
-set tf=100            # final time
+set tf=1              # final time
+set layout=13
 ##################################################################################
 
 # set vorticity damping coefficient
@@ -56,6 +58,7 @@ set MODE="64bit"      # choices:  32bit, 64bit
 set GRID="C$res"
 set HYPT="on"         # choices:  on, off  (controls hyperthreading)
 set COMP="repro"       # choices:  debug, repro, prod
+#set COMP="debug"       # choices:  debug, repro, prod
 set RELEASE = "solo_sw"         # run cycle, 1: no restart # z2: increased
 set EXE  = "intel.x"
 
@@ -92,8 +95,8 @@ set executable = ${BUILD_AREA}/Build/bin/SOLO_${TYPE}.${COMP}.${MODE}.${EXE}
 set npx=$Np1
 set npy=$Np1
 set npz="1" #Shallow water
-set layout_x="1"
-set layout_y="1"
+set layout_x=$layout
+set layout_y=$layout
 set io_layout="1,1"
 set nthreads="2"
 
@@ -287,7 +290,7 @@ cat > input.nml <<EOF
 /
 
  &test_case_nml
-    test_case = 2
+    test_case = $testcase
     alpha = $alpha
 /
 

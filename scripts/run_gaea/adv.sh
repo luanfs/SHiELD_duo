@@ -18,7 +18,7 @@ cd -
 # plot_scalar_field.py, plot_converge.py and plot_error_graph.py
 
 #test case
-tc="-6"
+tc="-3"
 
 # 1d advection scheme
 hords=(0 8)
@@ -67,7 +67,7 @@ alphas=(45 45 45 45 45 45 45 45)
 N=48
 
 #number of grids to be tested (we double the values N for each new grid and divide dt by 2)
-Ng=4
+Ng=5
 
 #----------------------------------------------------------------------------------------------
 

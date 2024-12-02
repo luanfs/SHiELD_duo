@@ -37,7 +37,7 @@ module dyn_core_mod
   use nh_core_mod,        only: Riem_Solver3, Riem_Solver_C, update_dz_c, update_dz_d, nh_bc
   use tp_core_mod,        only: copy_corners
   use fv_timing_mod,      only: timing_on, timing_off
-  use fv_diagnostics_mod, only: prt_maxmin, fv_time, prt_mxm, is_ideal_case
+  use fv_diagnostics_mod, only: prt_maxmin, fv_time, prt_mxm
   use fv_diag_column_mod, only: do_diag_debug_dyn, debug_column_dyn
 #ifdef ROT3
   use fv_update_phys_mod, only: update_dwinds_phys
@@ -57,7 +57,8 @@ module dyn_core_mod
   use fv_regional_mod,      only: delz_regBC ! TEMPORARY --- lmh
 
 #ifdef SW_DYNAMICS
-  use test_cases_mod,      only: test_case, case9_forcing1, case9_forcing2
+  use test_cases_mod,      only: test_case, case9_forcing1, case9_forcing2, wind_NL2010, error_adv_zonal, error_density,  error_divwind110
+  use test_cases_mod,      only: case110_forcing_cgrid, case110_forcing_dgrid
 #endif
   use fv_regional_mod,     only: dump_field, exch_uv, H_STAGGER, U_STAGGER, V_STAGGER
   use fv_regional_mod,     only: a_step, p_step, k_step, n_step
@@ -70,7 +71,7 @@ public :: dyn_core, del2_cubed, init_ijk_mem
 
   real :: ptk, peln1, rgrav
   real :: d3_damp
-  real, allocatable, dimension(:,:,:) ::  ut, vt, crx, cry, xfx, yfx, divgd, &
+  real, allocatable, dimension(:,:,:) ::  ut, vt, crx, cry, xfx, yfx, crx_dp2, cry_dp2, xfx_dp2, yfx_dp2, divgd, &
                                           zh, du, dv, pkc, delpc, pk3, ptc, gz
 ! real, parameter:: delt_max = 1.e-1   ! Max dissipative heating/cooling rate
                                        ! 6 deg per 10-min
@@ -90,8 +91,9 @@ contains
 
  subroutine dyn_core(npx, npy, npz, ng, sphum, nq, bdt, n_map, n_split, zvir, cp, akap, cappa, grav, hydrostatic,  &
                      duogrid, u,  v,  w, delz, pt, q, delp, pe, pk, phis, ws, omga, ptop, pfull, ua, va, &
-                     uc, vc, mfx, mfy, cx, cy, pkz, peln, q_con, ak, bk, &
-                     ks, gridstruct, flagstruct, neststruct, idiag, bd, domain, &
+                     uc, vc, uc_old, vc_old, mfx, mfy, cx, cy, pkz, peln, q_con, ak, bk, ks, &
+                     forcing_uc, forcing_vc, forcing_ud, forcing_vd, forcing_delp, &
+                     gridstruct, flagstruct, neststruct, idiag, bd, domain, &
                      init_step, i_pack, end_step, diss_est, consv, te0_2d, time_total)
     integer, intent(IN) :: npx
     integer, intent(IN) :: npy
@@ -119,7 +121,7 @@ contains
     real, intent(inout) :: q(   bd%isd:bd%ied  ,bd%jsd:bd%jed  ,npz, nq)  !
     real, intent(inout) :: diss_est(bd%isd:bd%ied  ,bd%jsd:bd%jed  ,npz)  !< skeb dissipation
     real, intent(in), optional:: time_total  ! total time (seconds) since start
-
+    logical :: init_step_atmos
 !-----------------------------------------------------------------------
 ! Auxilliary pressure arrays:
 ! The 5 vars below can be re-computed from delp and ptop.
@@ -129,7 +131,13 @@ contains
     real, intent(inout):: pe(bd%is-1:bd%ie+1, npz+1,bd%js-1:bd%je+1)  ! edge pressure (pascal)
     real, intent(inout):: peln(bd%is:bd%ie,npz+1,bd%js:bd%je)          ! ln(pe)
     real, intent(inout):: pk(bd%is:bd%ie,bd%js:bd%je, npz+1)        ! pe**kappa
-
+! forcing:
+    real, intent(INOUT) ::  forcing_uc(bd%isd:bd%ied+1,bd%jsd:bd%jed)
+    real, intent(INOUT) ::  forcing_vc(bd%isd:bd%ied+1,bd%jsd:bd%jed)
+    real, intent(INOUT) ::  forcing_ud(bd%isd:bd%ied  ,bd%jsd:bd%jed+1)
+    real, intent(INOUT) ::  forcing_vd(bd%isd:bd%ied  ,bd%jsd:bd%jed+1)
+    real, intent(INOUT) ::  forcing_delp(bd%isd:bd%ied  ,bd%jsd:bd%jed)
+ 
 !-----------------------------------------------------------------------
 ! Others:
     real,    parameter:: near0 = 1.E-8
@@ -143,6 +151,8 @@ contains
     real, intent(inout):: omga(bd%isd:bd%ied,bd%jsd:bd%jed,npz)    ! Vertical pressure velocity (pa/s)
     real, intent(inout):: uc(bd%isd:bd%ied+1,bd%jsd:bd%jed  ,npz)  ! (uc, vc) are mostly used as the C grid winds
     real, intent(inout):: vc(bd%isd:bd%ied  ,bd%jsd:bd%jed+1,npz)
+    real, intent(inout):: uc_old(bd%isd:bd%ied+1,bd%jsd:bd%jed  ,npz)  ! time averaged C grid winds
+    real, intent(inout):: vc_old(bd%isd:bd%ied  ,bd%jsd:bd%jed+1,npz)
     real, intent(inout), dimension(bd%isd:bd%ied,bd%jsd:bd%jed,npz):: ua, va
     real, intent(inout):: q_con(bd%isd:, bd%jsd:, 1:)
     real, intent(inout):: te0_2d(bd%is:bd%ie,bd%js:bd%je)
@@ -225,6 +235,7 @@ contains
     real    :: d2_divg_ct ! constant for ( flagstruct%d_ext > 0. )
     real    :: k1k, rdg, dtmp, delt
     real    :: recip_k_split_n_split
+    real    :: current_time
     real    :: reg_bc_update_time
     logical :: last_step, remap_step
     logical used
@@ -261,6 +272,9 @@ contains
     iep1 = ie + 1
     jep1 = je + 1
 
+    if(mpp_pe()==0)then
+      print*, 'time in days: ', time_total/86400d0, 'adv', flagstruct%adv_scheme, 'hord', flagstruct%hord_mt
+    endif
     if ( .not.hydrostatic ) then
 
          rgrav = 1.0/grav
@@ -289,6 +303,12 @@ contains
            allocate( xfx(is :ie+1, jsd:jed,  npz) )
            allocate( cry(isd:ied,  js :je+1, npz) )
            allocate( yfx(isd:ied,  js :je+1, npz) )
+
+           allocate( crx_dp2(is :ie+1, jsd:jed,  npz) )
+           allocate( xfx_dp2(is :ie+1, jsd:jed,  npz) )
+           allocate( cry_dp2(isd:ied,  js :je+1, npz) )
+           allocate( yfx_dp2(isd:ied,  js :je+1, npz) )
+ 
            allocate( divgd(isd:ied+1,jsd:jed+1,npz) )
            allocate( delpc(isd:ied, jsd:jed  ,npz  ) )
 !                    call init_ijk_mem(isd,ied, jsd,jed, npz, delpc, 0.)
@@ -342,6 +362,22 @@ contains
 !-----------------------------------------------------
   do it=1,n_split
 !-----------------------------------------------------
+#ifdef SW_DYNAMICS
+      if (test_case==-5 .or. test_case==-6 .or. test_case==-8 .or. test_case==-9)then
+        ! wind at time t_n
+         current_time = (time_total-bdt)+(it-1.0d0)*dt
+         call wind_NL2010(bd, uc_old, vc_old, u, v, flagstruct, gridstruct, domain,current_time)
+ 
+        ! centered in time wind (t_n+dt/2) - for variable speed advection simulations when using RK2 scheme
+         current_time = (time_total-bdt)+(it-0.5d0)*dt
+         call wind_NL2010(bd, uc, vc, u, v, flagstruct, gridstruct, domain,current_time)
+
+      else if (test_case <= 1 ) then
+         uc_old = uc
+         vc_old = vc
+      end if
+#endif
+
 #ifdef ROT3
 if (.not. duogrid ) then
      call start_group_halo_update(i_pack(8), u, v, domain, gridtype=DGRID_NE)
@@ -484,13 +520,14 @@ endif
                                                      call timing_off('COMM_TOTAL')
 
                                                      call timing_on('c_sw')
-!$OMP parallel do default(none) shared(npz,isd,jsd,delpc,delp,ptc,pt,u,v,w,uc,vc,ua,va, &
+!$OMP parallel do default(none) shared(npz,isd,jsd,delpc,delp,ptc,pt,u,v,w,uc,vc,uc_old,vc_old,ua,va, &
 !$OMP                                  omga,ut,vt,divgd,flagstruct,dt2,hydrostatic,bd,  &
 !$OMP                                  gridstruct)
       do k=1,npz
          call c_sw(delpc(isd,jsd,k), delp(isd,jsd,k),  ptc(isd,jsd,k),    &
                       pt(isd,jsd,k),    u(isd,jsd,k),    v(isd,jsd,k),    &
                        w(isd:,jsd:,k),   uc(isd,jsd,k),   vc(isd,jsd,k),    &
+                       uc_old(isd,jsd,k),   vc_old(isd,jsd,k),  &
                       ua(isd,jsd,k),   va(isd,jsd,k), omga(isd,jsd,k),    &
                       ut(isd,jsd,k),   vt(isd,jsd,k), divgd(isd,jsd,k),   &
                       flagstruct%nord,   dt2,  hydrostatic,  .true., bd,  &
@@ -569,7 +606,11 @@ endif
                  call gz_bc(gz, delz_regBC,bd,npx,npy,npz,mod(reg_bc_update_time,bc_time_interval*3600.), bc_time_interval*3600.)
               endif
            endif
-
+!if(mpp_pe()==0)then
+!        print*, maxval(abs(uc(is:ie+1,js:je,1))), &
+!                maxval(abs(vc(is:ie,js:je+1,1))), &
+!                maxval(abs(delpc(is:ie,js:je+1,1)))
+!endif
 !$OMP parallel do default(none) shared(isd,ied,jsd,jed,npz,zh,gz)
            do k=1, npz+1
               do j=jsd,jed
@@ -627,7 +668,6 @@ endif
       endif   ! end hydro check
 
       call p_grad_c(dt2, npz, delpc, pkc, gz, uc, vc, bd, gridstruct%rdxc, gridstruct%rdyc, hydrostatic)
-
                                                                    call timing_on('COMM_TOTAL')
 if (.not. duogrid ) then
       call start_group_halo_update(i_pack(9), uc, vc, domain, gridtype=CGRID_NE)
@@ -730,6 +770,16 @@ endif
       endif
 
     endif
+
+#ifdef SW_DYNAMICS
+     call case110_forcing_cgrid(uc,vc,delpc, forcing_uc,forcing_vc,forcing_delp, dt, bd, gridstruct, npz)
+     !print*, 'uc', maxval(abs(uc(is:ie+1,js:je,1)-uc_old(is:ie+1,js:je,1)))/maxval(abs(uc_old(is:ie+1,js:je,1)))
+     !print*, 'vc', maxval(abs(vc(is:ie,js:je+1,1)-vc_old(is:ie,js:je+1,1)))/maxval(abs(vc_old(is:ie,js:je+1,1)))
+
+#endif
+
+
+
                                                      call timing_on('d_sw')
 
 
@@ -737,11 +787,11 @@ endif
 !TODO: recheck the omp variables in the subsequent d_swx calls
 !$OMP parallel do default(none) shared(npz,flagstruct,nord_v,pfull,damp_vt,hydrostatic,last_step, &
 !$OMP                                  is,ie,js,je,isd,ied,jsd,jed,omga,delp,gridstruct,npx,npy,  &
-!$OMP                                  ng,zh,vt,ptc,pt,u,v,w,uc,vc,ua,va,divgd,mfx,mfy,cx,cy,     &
-!$OMP                                  crx,cry,xfx,yfx,q_con,zvir,sphum,nq,q,dt,bd,rdt,iep1,jep1, &
+!$OMP                                  ng,zh,vt,ptc,pt,u,v,w,uc,vc,uc_old,vc_old,ua,va,divgd,mfx,mfy,cx,cy,     &
+!$OMP                                  crx,cry,xfx,yfx,crx_dp2,cry_dp2,xfx_dp2,yfx_dp2,q_con,zvir,sphum,nq,q,dt,bd,rdt,iep1,jep1, &
 !$OMP                                  heat_source,allflux_x, allflux_y,rax,ray,utt,vtt, &
 !$OMP                                  ubb,vbb,ubbtemp,vbbtemp, &
-!$OMP                                  is_ideal_case,diss_est,radius,                 &
+!$OMP                                  diss_est,radius,                 &
 !$OMP                          nord_k, nord_w, nord_t, damp_w, damp_t, d2_divg,   &
 !$OMP                          d_con_k,kgb, hord_m, hord_v, hord_t, hord_p, wk, heat_s, diss_e, z_rat)
     do k=1,npz
@@ -781,7 +831,7 @@ endif
               if ( k==1 ) then
 ! Divergence damping:
                  nord_k(k)=0;
-                 if (is_ideal_case) then
+                 if (flagstruct%is_ideal_case) then
                     d2_divg(k) = max(flagstruct%d2_bg, flagstruct%d2_bg_k1)
                  else
                     d2_divg(k) = max(0.01, flagstruct%d2_bg, flagstruct%d2_bg_k1)
@@ -838,9 +888,10 @@ endif
 
        call d_sw1( delp(isd,jsd,k),  pt(isd,jsd,k),      &
                   w(isd:,jsd:,k),  uc(isd,jsd,k),      &
-                  vc(isd,jsd,k),   &
+                  vc(isd,jsd,k),   uc_old(isd,jsd,k), vc_old(isd,jsd,k), &
                   mfx(is, js, k),  mfy(is, js, k),  cx(is, jsd,k),  cy(isd,js, k),    &
                   crx(is, jsd,k),  cry(isd,js, k), xfx(is, jsd,k), yfx(isd,js, k),    &
+                  crx_dp2(is, jsd,k),  cry_dp2(isd,js, k), xfx_dp2(is, jsd,k), yfx_dp2(isd,js, k),    &
 #ifdef USE_COND
                   q_con(isd:,jsd:,k),  &
 #else
@@ -853,19 +904,20 @@ endif
                   damp_vt(k), damp_t, hydrostatic, gridstruct, flagstruct, bd, &
                   allflux_x,allflux_y,rax(is,jsd,k),ray(isd,js,k),utt(isd,jsd,k),vtt(isd,jsd,k))
 
+                  !vc(isd,jsd,k), uc_old(isd,jsd,k), vc_old(isd,jsd,k), dt,  &
        call d_sw3(u(isd,jsd,k),    v(isd,jsd,k),  uc(isd,jsd,k),      &
-                  vc(isd,jsd,k),  dt,  &
+                  vc(isd,jsd,k), dt,  &
                   hord_m, gridstruct, flagstruct, bd, &
                   utt(isd,jsd,k),vtt(isd,jsd,k),ubbtemp(is,js,k),vbbtemp(is,js,k), &
                   ubb(is,js,k),vbb(is,js,k))
 enddo
 
                                     call timing_off('dsw13')
-                                    call timing_on('FLUX_AV')
 !here we average fluxes computed in d_sw1
 !looping over those of interest
 !includes tracers
-if (duogrid) then
+if (duogrid .and. flagstruct%mass_fixer==1) then
+                                    call timing_on('FLUX_AV')
 ! averaging 1delp and 4temp fluxes is fundamental
 ! need to figure out a better way for tracers and when inline_q=F so it doesnt crash
   do iq=1,4!+nq ! 1delp 2w 3qcon 4temp 5>q
@@ -886,12 +938,12 @@ do k=1,npz !! check why K is needed here but not in the next calls
 enddo
 
                                     call timing_on('FLUX_AV_get_boundary')
+
 ! NEED a 4D boundary call
     call mpp_get_boundary(fxx_delp, fyy_delp, domain, &
                 wbufferx=wbuffer, ebufferx=ebuffer,  &
                 sbuffery=sbuffer, nbuffery=nbuffer, gridtype=CGRID_NE )
                                     call timing_off('FLUX_AV_get_boundary')
-
 !$OMP parallel do default(none) shared(npz,iq,is,ie,js,je,allflux_x, allflux_y,fxx_delp, fyy_delp, sbuffer, nbuffer, ebuffer, &
 !$OMP                                  wbuffer)
 do k=1,npz
@@ -899,6 +951,7 @@ do k=1,npz
       fyy_delp(i,js,  k) = 0.5*(fyy_delp(i,js,  k)+sbuffer(i-is+1,k)) !!!!! CODE CRASHES HERE !!!!!
       fyy_delp(i,je+1,k) = 0.5*(fyy_delp(i,je+1,k)+nbuffer(i-is+1,k))
     enddo
+
     do j=js,je
       fxx_delp(is  ,j,k) = 0.5*(fxx_delp(is  ,j,k)+wbuffer(j-js+1,k))
       fxx_delp(ie+1,j,k) = 0.5*(fxx_delp(ie+1,j,k)+ebuffer(j-js+1,k))
@@ -917,7 +970,6 @@ do k=1,npz
 enddo
   ! endif ! if iq
   enddo  ! do iq
-
 
 !! FOR DSW3 FLUXES
 !!!!!!!!!!!!!!!!!!!!!
@@ -957,9 +1009,9 @@ enddo
     enddo
   enddo
 
+                                    call timing_off('FLUX_AV')
 endif !if duo
 
-                                    call timing_off('FLUX_AV')
 !!!!!!!!!!!!!!!!!!!!!!
 !!!!!!!!!!!!!!!!!!!!!! NOT FOR TESTING, ke is computed here
 !do k=1,npz
@@ -972,14 +1024,14 @@ endif !if duo
 !enddo
 !!!!!!!!!!!!!!!!!!!!!!
 !!!!!!!!!!!!!!!!!!!!!!
-!
+!stop
 
                                     call timing_on('dsw2456')
 !$OMP parallel do default(none) shared(npz,flagstruct,nord_v,pfull,damp_vt,hydrostatic, duogrid,last_step, &
 !$OMP                                  is,ie,js,je,isd,ied,jsd,jed,omga,delp,gridstruct,npx,npy,  &
 !$OMP                                  ng,zh,vt,ptc,pt,u,v,w,uc,vc,ua,va,divgd,mfx,mfy,cx,cy,     &
-!$OMP                                  crx,cry,xfx,yfx,q_con,zvir,sphum,nq,q,dt,bd,rdt,iep1,jep1, &
-!$OMP                                  heat_source, diss_est, is_ideal_case,allflux_x, allflux_y,rax,ray,utt,vtt, &
+!$OMP                                  crx,cry,xfx,yfx,crx_dp2,cry_dp2,xfx_dp2,yfx_dp2,q_con,zvir,sphum,nq,q,dt,bd,rdt,iep1,jep1, &
+!$OMP                                  heat_source, diss_est, allflux_x, allflux_y,rax,ray,utt,vtt, &
 !$OMP                                  kee,dw, wkk, ubb, vbb, ubbtemp, vbbtemp, vortfluxx, vortfluxy, &
 !$OMP                          nord_k, nord_w, nord_t, damp_w, damp_t, d2_divg,   &
 !$OMP                          d_con_k,kgb, hord_m, hord_v, hord_t, hord_p, wk, heat_s, diss_e, z_rat)
@@ -1019,6 +1071,7 @@ do k=1,npz
                   u(isd,jsd,k),    v(isd,jsd,k),   w(isd:,jsd:,k),  uc(isd,jsd,k),      &
                   vc(isd,jsd,k),   ua(isd,jsd,k),  va(isd,jsd,k), divgd(isd,jsd,k),   &
                   crx(is, jsd,k),  cry(isd,js, k), xfx(is, jsd,k), yfx(isd,js, k),    &
+                  crx_dp2(is, jsd,k),  cry_dp2(isd,js, k), xfx_dp2(is, jsd,k), yfx_dp2(isd,js, k),    &
 #ifdef USE_COND
                   q_con(isd:,jsd:,k),  z_rat(isd,jsd),  &
 #else
@@ -1592,9 +1645,25 @@ endif
               allocated(heat_source), npz, nq, sphum, flagstruct%nwat, zvir, ptop, hydrostatic, bd, fv_time, n_map, it)
       endif
 
+#ifdef SW_DYNAMICS
+     call case110_forcing_dgrid(u,v,delp, forcing_ud,forcing_vd,forcing_delp, dt, bd, gridstruct, npz)
+#endif
+
+
 !-----------------------------------------------------
   enddo   ! time split loop
 !-----------------------------------------------------
+#ifdef SW_DYNAMICS
+      if (test_case==2 .or. test_case==1 .or. test_case==-3 .or. test_case==-4) then
+         init_step_atmos = time_total==bdt
+         call error_adv_zonal(bd, delp, flagstruct, gridstruct, domain, time_total, init_step_atmos)
+         call error_density(npz, nq, bd, q, flagstruct, gridstruct, domain, time_total, init_step_atmos)
+      else if(test_case==110)then
+         init_step_atmos = time_total==bdt
+         call error_divwind110(bd, delp, flagstruct, gridstruct, domain, time_total, init_step_atmos)
+      end if
+#endif
+
     if ( nq > 0 .and. .not. flagstruct%inline_q ) then
        call timing_on('COMM_TOTAL')
        call timing_on('COMM_TRACER')
@@ -1667,6 +1736,12 @@ endif
     deallocate(   xfx )
     deallocate(   cry )
     deallocate(   yfx )
+
+    deallocate(   crx_dp2)
+    deallocate(   xfx_dp2)
+    deallocate(   cry_dp2)
+    deallocate(   yfx_dp2)
+ 
     deallocate( divgd )
     deallocate(   pkc )
     deallocate( delpc )
@@ -1682,6 +1757,7 @@ endif
 
   endif
   if( allocated(pem) )   deallocate ( pem )
+  !stop
 
 end subroutine dyn_core
 

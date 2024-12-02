@@ -81,8 +81,8 @@ def plot_scalarfield(q, map_projection, title, filename, filepath, colormap, qmi
         im = ax.pcolormesh(lon, lat, q[:,:,tile], alpha=1, transform=ccrs.PlateCarree(), \
         zorder=10, vmin = qmin, vmax=qmax,  cmap=colormap)
     # gaussian at corner
-    #plt.xlim(45-25,45+25)
-    #plt.ylim(10,45+15)
+    plt.xlim(45-25,45+25)
+    plt.ylim(10,45+15)
     # cylinder
     #plt.xlim(10,80)
     #plt.ylim(5,65)

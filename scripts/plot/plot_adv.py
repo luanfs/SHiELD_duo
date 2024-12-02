@@ -9,7 +9,7 @@ dpi = 100
 
 # Map projection
 map_projection = "mercator"
-map_projection = "sphere"
+#map_projection = "sphere"
 
 #graphdir='/scratch/cimes/ls9640/graphs_solo_sw/'
 #datadir='/scratch/cimes/ls9640/solo_sw/'
@@ -22,7 +22,7 @@ figformat='png'
 
 #-------------------------------------------------------------------
 # test parameters
-tc = -6
+tc = -3
 
 # 1dadvection scheme
 hord = 8
@@ -34,7 +34,7 @@ gtype = 0 # 0-equiedge; 2-equiangular
 dg = 2
 
 # 2d advection scheme
-adv = 1
+adv = 2
 
 # mass fixer
 mf = 1
@@ -201,8 +201,8 @@ for N in Ns:
     #h_error_abs = 1.0*10**(-2)
     #h_error_abs = 3*10**(-3)
     #h_error_abs = 2*10**(-2)
-    #h_error_abs = 4*10**(-4)
-    h_error_abs = 3.6*10**(-3)
+    h_error_abs = 4*10**(-4)
+    #h_error_abs = 3.6*10**(-3)
    # h_error_abs = 0.00039845
    # print(h_error_abs)
     #h_error_abs = 3.6*10**(-3)

@@ -26,6 +26,7 @@ module tp_core_mod
 !
  use fv_grid_utils_mod, only: big_number
  use fv_arrays_mod,     only: fv_grid_type, fv_grid_bounds_type
+ use mpp_mod,            only: mpp_pe
 
  implicit none
 
@@ -78,11 +79,10 @@ module tp_core_mod
 contains
 
  subroutine fv_tp_2d(q, crx, cry, npx, npy, hord, fx, fy, xfx, yfx,  &
-                     gridstruct, bd, ra_x, ra_y, lim_fac, mfx, mfy, mass, nord, damp_c)
+                     gridstruct, bd, ra_x, ra_y, lim_fac, mfx, mfy, mass, nord, damp_c, advscheme)
    type(fv_grid_bounds_type), intent(IN) :: bd
    integer, intent(in):: npx, npy
    integer, intent(in)::hord
-
    real, intent(in)::  crx(bd%is:bd%ie+1,bd%jsd:bd%jed)  !
    real, intent(in)::  xfx(bd%is:bd%ie+1,bd%jsd:bd%jed)  !
    real, intent(in)::  cry(bd%isd:bd%ied,bd%js:bd%je+1 )  !
@@ -102,14 +102,20 @@ contains
    real, OPTIONAL, intent(in):: mass(bd%isd:bd%ied,bd%jsd:bd%jed)
    real, OPTIONAL, intent(in):: damp_c
    integer, OPTIONAL, intent(in):: nord
+   integer, OPTIONAL, intent(in):: advscheme
 ! Local:
    integer ord_ou, ord_in
+   integer :: adv_scheme
    real q_i(bd%isd:bd%ied,bd%js:bd%je)
    real q_j(bd%is:bd%ie,bd%jsd:bd%jed)
    real   fx2(bd%is:bd%ie+1,bd%jsd:bd%jed)
    real   fy2(bd%isd:bd%ied,bd%js:bd%je+1)
    real   fyy(bd%isd:bd%ied,bd%js:bd%je+1)
    real   fx1(bd%is:bd%ie+1)
+   real   qmt(bd%isd:bd%ied,bd%jsd:bd%jed)  ! transported scalar * metricterm
+   real, pointer, dimension(:,:) ::  mt_a
+   real, pointer, dimension(:,:) ::  mt_c
+   real, pointer, dimension(:,:) ::  mt_d
    real   damp
    integer i, j
 
@@ -124,6 +130,17 @@ contains
    jsd = bd%jsd
    jed = bd%jed
 
+   if(.not. present(advscheme)) then
+      adv_scheme = 1
+   else
+      adv_scheme = advscheme
+   endif
+
+   mt_a  => gridstruct%metricterm_a
+   mt_c  => gridstruct%metricterm_c
+   mt_d  => gridstruct%metricterm_d
+
+
    if ( hord == 10 ) then
         ord_in = 8
    else
@@ -135,41 +152,85 @@ contains
       call copy_corners(q, npx, npy, 2, gridstruct%bounded_domain, bd, &
                          gridstruct%sw_corner, gridstruct%se_corner, gridstruct%nw_corner, gridstruct%ne_corner)
 
-   call yppm(fy2, q, cry, ord_in, isd,ied,isd,ied, js,je,jsd,jed, npx,npy, gridstruct%dya, &
-             gridstruct%bounded_domain, gridstruct%grid_type, lim_fac)
+   if(adv_scheme==1) then
+      call yppm(fy2, q, cry, ord_in, isd,ied,isd,ied, js,je,jsd,jed, npx,npy, gridstruct%dya, &
+                gridstruct%bounded_domain, gridstruct%grid_type, lim_fac)
+   else if(adv_scheme==2) then
+      call yppm_metric(fy2, q, cry, ord_in, isd,ied,isd,ied, js,je,jsd,jed, npx,npy, gridstruct%dya, &
+                gridstruct%bounded_domain, gridstruct%grid_type, lim_fac, mt_a, mt_d)
+ 
+   endif
 
    do j=js,je+1
       do i=isd,ied
          fyy(i,j) = yfx(i,j) * fy2(i,j)
       enddo
    enddo
-   do j=js,je
-      do i=isd,ied
-         q_i(i,j) = (q(i,j)*gridstruct%area(i,j) + fyy(i,j)-fyy(i,j+1))/ra_y(i,j)
-      enddo
-   enddo
 
-   call xppm(fx, q_i, crx(is,js), ord_ou, is,ie,isd,ied, js,je,jsd,jed, npx,npy, &
+   if(adv_scheme==1) then
+      do j=js,je
+         do i=isd,ied
+            q_i(i,j) = (q(i,j)*gridstruct%area(i,j) + fyy(i,j)-fyy(i,j+1))/ra_y(i,j)
+         enddo
+      enddo
+      call xppm(fx, q_i, crx(is,js), ord_ou, is,ie,isd,ied, js,je,jsd,jed, npx,npy, &
              gridstruct%dxa, gridstruct%bounded_domain, gridstruct%grid_type, lim_fac)
+
+   else if(adv_scheme==2) then
+      do j=js,je
+         do i=isd,ied
+            q_i(i,j) = q(i,j) -(fyy(i,j+1)-fyy(i,j))*gridstruct%rarea(i,j)
+            !q_i(i,j) = q_i(i,j)*mt_a(i,j)
+         enddo
+      enddo
+      call xppm_metric(fx, q_i, crx(is,js), ord_ou, is,ie,isd,ied, js,je,jsd,jed, npx,npy, &
+             gridstruct%dxa, gridstruct%bounded_domain, gridstruct%grid_type, lim_fac, mt_a, mt_c)
+      !call xppm(fx, q_i, crx(is,js), ord_ou, is,ie,isd,ied, js,je,jsd,jed, npx,npy, &
+      !       gridstruct%dxa, gridstruct%bounded_domain, gridstruct%grid_type, lim_fac)
+   endif
 
    if (.not. gridstruct%bounded_domain) &
      call copy_corners(q, npx, npy, 1, gridstruct%bounded_domain, bd, &
                        gridstruct%sw_corner, gridstruct%se_corner, gridstruct%nw_corner, gridstruct%ne_corner)
 
-   call xppm(fx2, q, crx, ord_in, is,ie,isd,ied, jsd,jed,jsd,jed, npx,npy, gridstruct%dxa, &
-             gridstruct%bounded_domain, gridstruct%grid_type, lim_fac)
 
-   do j=jsd,jed
-      do i=is,ie+1
-         fx1(i) =  xfx(i,j) * fx2(i,j)
-      enddo
-      do i=is,ie
-         q_j(i,j) = (q(i,j)*gridstruct%area(i,j) + fx1(i)-fx1(i+1))/ra_x(i,j)
-      enddo
-   enddo
+   if(adv_scheme==1) then
+      call xppm(fx2, q, crx, ord_in, is,ie,isd,ied, jsd,jed,jsd,jed, npx,npy, gridstruct%dxa, &
+                gridstruct%bounded_domain, gridstruct%grid_type, lim_fac)
+   else if(adv_scheme==2) then
+      call xppm_metric(fx2, q, crx, ord_in, is,ie,isd,ied, jsd,jed,jsd,jed, npx,npy, gridstruct%dxa, &
+                gridstruct%bounded_domain, gridstruct%grid_type, lim_fac, mt_a, mt_c)
+   endif
 
-   call yppm(fy, q_j, cry, ord_ou, is,ie,isd,ied, js,je,jsd,jed, npx, npy, gridstruct%dya, &
-             gridstruct%bounded_domain, gridstruct%grid_type, lim_fac)
+   if(adv_scheme==1) then
+      do j=jsd,jed
+         do i=is,ie+1
+            fx1(i) =  xfx(i,j) * fx2(i,j)
+         enddo
+         do i=is,ie
+            q_j(i,j) = (q(i,j)*gridstruct%area(i,j) + fx1(i)-fx1(i+1))/ra_x(i,j)
+         enddo
+      enddo
+      call yppm(fy, q_j, cry, ord_ou, is,ie,isd,ied, js,je,jsd,jed, npx, npy, gridstruct%dya, &
+                gridstruct%bounded_domain, gridstruct%grid_type, lim_fac)
+
+   else if(adv_scheme==2) then
+      do j=jsd,jed
+         do i=is,ie+1
+            fx1(i) =  xfx(i,j) * fx2(i,j)
+         enddo
+         do i=is,ie
+            q_j(i,j) =  q(i,j)-(fx1(i+1)-fx1(i))*gridstruct%rarea(i,j)
+            !q_j(i,j) = q_j(i,j)*mt_a(i,j)
+         enddo
+      enddo
+      call yppm_metric(fy, q_j, cry, ord_ou, is,ie,isd,ied, js,je,jsd,jed, npx, npy, gridstruct%dya, &
+                gridstruct%bounded_domain, gridstruct%grid_type, lim_fac, mt_a, mt_d)
+      !call yppm(fy, q_j, cry, ord_ou, is,ie,isd,ied, js,je,jsd,jed, npx, npy, gridstruct%dya, &
+      !          gridstruct%bounded_domain, gridstruct%grid_type, lim_fac)
+
+
+   endif
 
 !----------------
 ! Flux averaging:
@@ -341,7 +402,24 @@ contains
        q1(i) = q(i,j)
     enddo
 
- if ( iord < 7 ) then
+ if (iord==0) then
+  do i=is1, ie3
+     al(i) = p1*(q1(i-1)+q1(i)) + p2*(q1(i-2)+q1(i+1))
+  enddo
+
+  do i=is1, ie1
+     bl(i) =  al(i)-q1(i)
+     br(i) =  al(i+1)-q1(i)
+  enddo
+
+  do i=is,ie+1
+     if( c(i,j)>0. ) then
+         flux(i,j) = q1(i-1) + (1.-c(i,j))*(br(i-1)-c(i,j)*(bl(i-1)+br(i-1)))
+     else
+         flux(i,j) = q1(i  ) + (1.+c(i,j))*(bl(i  )+c(i,j)*(bl(i)+br(i)))
+     endif
+  enddo
+else if ( iord < 7 ) then
 ! ord = 2: perfectly linear ppm scheme
 ! Diffusivity: ord2 < ord5 < ord3 < ord4 < ord6
 
@@ -710,8 +788,31 @@ contains
    endif
 
  mord = abs(jord)
+if (jord==0) then
+   do i=ifirst,ilast
+      do j=js1, je3
+         al(i,j) = p1*(q(i,j-1)+q(i,j)) + p2*(q(i,j-2)+q(i,j+1))
+      enddo
+   enddo
 
-if ( jord < 7 ) then
+   do i=ifirst,ilast
+      do j=js1, je1
+         bl(i,j) =  al(i,j  )-q(i,j)
+         br(i,j) =  al(i,j+1)-q(i,j)
+      enddo
+   enddo
+
+
+   do i=ifirst,ilast
+      do j=js,je+1
+         if( c(i,j)>0. ) then
+            flux(i,j) = q(i,j-1) + (1.-c(i,j))*(br(i,j-1)-c(i,j)*(bl(i,j-1)+br(i,j-1)))
+         else
+            flux(i,j) = q(i,j  ) + (1.+c(i,j))*(bl(i,j  )+c(i,j)*(bl(i,j  )+br(i,j  )))
+         endif
+      enddo
+   enddo
+else if ( jord < 7 ) then
 
    do j=js1, je3
       do i=ifirst,ilast
@@ -1358,6 +1459,224 @@ endif
    endif
 
  end subroutine deln_flux
+
+ subroutine xppm_metric(flux, q, c, iord, is,ie,isd,ied, jfirst,jlast,jsd,jed, npx, npy, dxa, bounded_domain, grid_type, lim_fac, mt_a, mt_c)
+ integer, INTENT(IN) :: is, ie, isd, ied, jsd, jed
+ integer, INTENT(IN) :: jfirst, jlast  ! compute domain
+ integer, INTENT(IN) :: iord
+ integer, INTENT(IN) :: npx, npy
+ real   , INTENT(IN) :: q(isd:ied,jfirst:jlast)
+ real   , INTENT(IN) :: mt_a(isd:ied  ,jsd:jed  )
+ real   , INTENT(IN) :: mt_c(isd:ied+1,jsd:jed  )
+ real   , INTENT(IN) :: c(is:ie+1,jfirst:jlast) ! Courant   N (like FLUX)
+ real   , intent(IN) :: dxa(isd:ied,jsd:jed)
+ logical, intent(IN) :: bounded_domain
+ integer, intent(IN) :: grid_type
+ real   , intent(IN) :: lim_fac
+! !OUTPUT PARAMETERS:
+ real  , INTENT(OUT) :: flux(is:ie+1,jfirst:jlast) !  Flux
+! Local
+ real, dimension(is-1:ie+1):: bl, br, b0, a4, da1
+ real:: q1(isd:ied)
+ real:: qmt(isd:ied)
+ real, dimension(is:ie+1):: fx0, fx1, xt1
+ logical, dimension(is-1:ie+1):: ext5, ext6, smt5, smt6
+ logical, dimension(is:ie+1):: hi5, hi6
+ real  al(is-1:ie+2)
+ real  ar(is-1:ie+2)
+ real  dm(is-2:ie+2)
+ real  dq(is-3:ie+2)
+ integer:: i, j, ie3, is1, ie1, mord
+ real:: x0, x1, xt, qtmp, pmp_1, lac_1, pmp_2, lac_2
+
+ if ( .not. bounded_domain .and. grid_type<3 ) then
+    is1 = max(3,is-1);  ie3 = min(npx-2,ie+2)
+                        ie1 = min(npx-3,ie+1)
+ else
+    is1 = is-1;         ie3 = ie+2
+                        ie1 = ie+1
+ end if
+
+ mord = abs(iord)
+
+ do j=jfirst,jlast
+
+    do i=isd, ied
+       q1(i) = q(i,j)
+       qmt(i) = q(i,j)*mt_a(i,j)
+    enddo
+
+ if (iord==0 .or. iord==5) then
+  do i=is1, ie3
+     !al(i) = p1*(qmt(i-1)+qmt(i)) + p2*(qmt(i-2)+qmt(i+1))
+     al(i) = p1*(q1(i-1)+q1(i)) + p2*(q1(i-2)+q1(i+1))
+     al(i) = al(i)*mt_c(i,j)
+  enddo
+
+  do i=is1, ie1
+     bl(i) =  al(i)-qmt(i)
+     br(i) =  al(i+1)-qmt(i)
+  enddo
+
+  do i=is,ie+1
+     if( c(i,j)>0. ) then
+         flux(i,j) = qmt(i-1) + (1.-c(i,j))*(br(i-1)-c(i,j)*(bl(i-1)+br(i-1)))
+     else
+         flux(i,j) = qmt(i  ) + (1.+c(i,j))*(bl(i  )+c(i,j)*(bl(i)+br(i)))
+     endif
+  enddo
+
+else if (iord==8) then
+    !q1 = qmt
+    do i=is-2,ie+2
+          xt = 0.25*(q1(i+1) - q1(i-1))
+       dm(i) = sign(min(abs(xt), max(q1(i-1), q1(i), q1(i+1)) - q1(i),  &
+                         q1(i) - min(q1(i-1), q1(i), q1(i+1))), xt)
+    enddo
+
+    do i=is1,ie1+1
+       al(i) = 0.5*(q1(i-1)+q1(i)) + r3*(dm(i-1)-dm(i))
+    enddo
+
+    do i=is1,ie1+1
+       xt = 2.*dm(i)
+       al(i) = q1(i) - sign(min(abs(xt), abs(al(i  )-q1(i))), xt)
+       ar(i) = q1(i) + sign(min(abs(xt), abs(al(i+1)-q1(i))), xt)
+       al(i) = al(i)*mt_c(i,j)
+       ar(i) = ar(i)*mt_c(i+1,j)
+    enddo
+
+    do i=is1, ie1
+       bl(i) = al(i) - qmt(i)
+       br(i) = ar(i) - qmt(i)
+    enddo
+
+    do i=is,ie+1
+       if( c(i,j)>0. ) then
+           flux(i,j) = qmt(i-1) + (1.-c(i,j))*(br(i-1)-c(i,j)*(bl(i-1)+br(i-1)))
+       else
+           flux(i,j) = qmt(i  ) + (1.+c(i,j))*(bl(i  )+c(i,j)*(bl(i)+br(i)))
+       endif
+    enddo
+endif
+enddo
+ end subroutine xppm_metric
+
+
+ subroutine yppm_metric(flux, q,  c, jord, ifirst,ilast, isd,ied, js,je,jsd,jed, npx, npy, dya, bounded_domain, grid_type, lim_fac, mt_a, mt_d)
+ integer, INTENT(IN) :: ifirst,ilast    ! Compute domain
+ integer, INTENT(IN) :: isd,ied, js,je,jsd,jed
+ integer, INTENT(IN) :: jord
+ integer, INTENT(IN) :: npx, npy
+ real   , INTENT(IN) :: q(ifirst:ilast,jsd:jed)
+ real   , INTENT(IN) :: mt_a(isd:ied  ,jsd:jed  )
+ real   , INTENT(IN) :: mt_d(isd:ied  ,jsd:jed+1)
+ real   , intent(in) :: c(isd:ied,js:je+1 )  ! Courant number
+ real   , INTENT(OUT):: flux(ifirst:ilast,js:je+1)   !  Flux
+ real   , intent(IN) :: dya(isd:ied,jsd:jed)
+ logical, intent(IN) :: bounded_domain
+ integer, intent(IN) :: grid_type
+ real   , intent(IN) :: lim_fac
+! Local:
+ real:: qmt(ifirst:ilast,jsd:jed)
+ real:: dm(ifirst:ilast,js-2:je+2)
+ real:: al(ifirst:ilast,js-1:je+2)
+ real:: ar(ifirst:ilast,js-1:je+2)
+ real, dimension(ifirst:ilast,js-1:je+1):: bl, br, b0
+ real:: dq(ifirst:ilast,js-3:je+2)
+ real,    dimension(ifirst:ilast):: fx0, fx1, xt1, a4
+ logical, dimension(ifirst:ilast,js-1:je+1):: smt5, smt6
+ logical, dimension(ifirst:ilast):: hi5, hi6
+ real:: x0, xt, qtmp, pmp_1, lac_1, pmp_2, lac_2
+ integer:: i, j, js1, je3, je1, mord
+
+   if ( .not.bounded_domain .and. grid_type < 3 ) then
+! Cubed-sphere:
+      js1 = max(3,js-1); je3 = min(npy-2,je+2)
+                         je1 = min(npy-3,je+1)
+   else
+! Bounded_domain grid OR Doubly periodic domain:
+      js1 = js-1;        je3 = je+2
+                         je1 = je+1
+   endif
+
+ mord = abs(jord)
+ do j=jsd, jed
+   do i=ifirst,ilast
+      qmt(i,j) = q(i,j)*mt_a(i,j)
+   enddo
+ enddo
+
+if (jord==0 .or. jord==5) then
+   do i=ifirst,ilast
+      do j=js1, je3
+         !al(i,j) = p1*(qmt(i,j-1)+qmt(i,j)) + p2*(qmt(i,j-2)+qmt(i,j+1))
+         al(i,j) = p1*(q(i,j-1)+q(i,j)) + p2*(q(i,j-2)+q(i,j+1))
+         al(i,j) = al(i,j)*mt_d(i,j)
+      enddo
+   enddo
+
+   do i=ifirst,ilast
+      do j=js1, je1
+         bl(i,j) =  al(i,j  )-qmt(i,j)
+         br(i,j) =  al(i,j+1)-qmt(i,j)
+      enddo
+   enddo
+
+   do i=ifirst,ilast
+      do j=js,je+1
+         if( c(i,j)>0. ) then
+            flux(i,j) = qmt(i,j-1) + (1.-c(i,j))*(br(i,j-1)-c(i,j)*(bl(i,j-1)+br(i,j-1)))
+         else
+            flux(i,j) = qmt(i,j  ) + (1.+c(i,j))*(bl(i,j  )+c(i,j)*(bl(i,j  )+br(i,j  )))
+         endif
+      enddo
+   enddo
+else if(jord==8) then
+  do j=js-2,je+2
+     do i=ifirst,ilast
+             xt = 0.25*(q(i,j+1) - q(i,j-1))
+        dm(i,j) = sign(min(abs(xt), max(q(i,j-1), q(i,j), q(i,j+1)) - q(i,j),   &
+                           q(i,j) - min(q(i,j-1), q(i,j), q(i,j+1))), xt)
+     enddo
+  enddo
+
+  do j=js1,je1+1
+     do i=ifirst,ilast
+        al(i,j) = 0.5*(q(i,j-1)+q(i,j)) + r3*(dm(i,j-1) - dm(i,j))
+     enddo
+  enddo
+
+  do j=js1,je1+1
+     do i=ifirst,ilast
+        xt = 2.*dm(i,j)
+        al(i,j) = q(i,j) - sign(min(abs(xt), abs(al(i,j)-q(i,j))),   xt)
+        ar(i,j) = q(i,j) + sign(min(abs(xt), abs(al(i,j+1)-q(i,j))), xt)
+        al(i,j) = al(i,j)*mt_d(i,j)
+        ar(i,j) = ar(i,j)*mt_d(i,j+1)
+     enddo
+  enddo
+
+  do j=js1,je1
+     do i=ifirst,ilast
+        bl(i,j) = al(i,j) - qmt(i,j)
+        br(i,j) = ar(i,j) - qmt(i,j)
+     enddo
+  enddo
+
+  do j=js,je+1
+    do i=ifirst,ilast
+       if( c(i,j)>0. ) then
+           flux(i,j) = qmt(i,j-1) + (1.-c(i,j))*(br(i,j-1)-c(i,j)*(bl(i,j-1)+br(i,j-1)))
+       else
+           flux(i,j) = qmt(i,j  ) + (1.+c(i,j))*(bl(i,j  )+c(i,j)*(bl(i,j)+br(i,j)))
+       endif
+    enddo
+  enddo
+ 
+
+endif
+ end subroutine yppm_metric
 
 
 end module tp_core_mod

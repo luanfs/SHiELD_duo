@@ -12,11 +12,11 @@ graphdir='/scratch/cimes/ls9640/graphs_solo_sw/'
 datadir='/scratch/cimes/ls9640/solo_sw/'
 graphdir='/gpfs/f5/scratch/Luan.Santos/gfdl_w/graphs_solo_sw/'
 datadir='/gpfs/f5/scratch/Luan.Santos/gfdl_w/solo_sw/'
-figformat='eps'
+figformat='png'
 
 #--------------------------------------------------------------------------------------------------------
 # test case
-tc = -5
+tc = -3
 
 # 1d advection scheme
 hords = (0,8)
@@ -181,8 +181,8 @@ for g in range(0, len(gtypes)):
                 error_l2[n,m,k,g] = np.sqrt(error_l2[n,m,k,g])/np.sqrt(den_l2[n,m,k,g])
 
 
-            #print(gname, 'hord'+str(hord), advname, N, error_linf[n,m,k,g], error_l1[n,m,k,g], error_l2[n,m,k,g])
-            print(gname, 'hord '+str(hord_name), advname, 'mf', mf, N, error_linf[n,m,k,g])
+            print(gname, 'hord'+str(hord), advname, N, error_linf[n,m,k,g], error_l1[n,m,k,g], error_l2[n,m,k,g])
+            #print(gname, 'hord '+str(hord_name), advname, 'mf', mf, N, error_linf[n,m,k,g])
 
             # update counter
             n = n + 1

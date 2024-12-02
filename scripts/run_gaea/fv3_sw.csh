@@ -6,7 +6,7 @@
 #SBATCH --account=gfdl_w
 #SBATCH --time=1:30:00
 #SBATCH --cluster=c5
-#SBATCH --nodes=6
+#SBATCH --nodes=10
 
 
 set echo
@@ -97,8 +97,8 @@ echo $WORKDIR
 set npx=$Np1
 set npy=$Np1
 set npz = "1" #Shallow water
-set layout_x = "1" 
-set layout_y = "1" 
+set layout_x = "6" 
+set layout_y = "6" 
 set io_layout = "1,1" #Want to increase this in a production run??
 set nthreads = "2"
 

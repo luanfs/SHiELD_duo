@@ -270,7 +270,9 @@ contains
                      Atm(n)%delz, Atm(n)%flagstruct%hydrostatic, Atm(n)%flagstruct%duogrid,         &
                      Atm(n)%pt, Atm(n)%delp, Atm(n)%q, Atm(n)%ps,                     &
                      Atm(n)%pe, Atm(n)%pk, Atm(n)%peln, Atm(n)%pkz, Atm(n)%phis,      &
-                     Atm(n)%q_con, Atm(n)%omga, Atm(n)%ua, Atm(n)%va, Atm(n)%uc, Atm(n)%vc, &
+                     Atm(n)%q_con, Atm(n)%omga, Atm(n)%ua, Atm(n)%va, Atm(n)%uc, Atm(n)%vc, Atm(n)%uc_old, Atm(n)%vc_old, &
+                     Atm(n)%forcing_uc, Atm(n)%forcing_vc, Atm(n)%forcing_ud, Atm(n)%forcing_vd, &
+                     Atm(n)%forcing_delp, &
                      Atm(n)%ak, Atm(n)%bk, Atm(n)%mfx, Atm(n)%mfy,                    &
                      Atm(n)%cx, Atm(n)%cy, Atm(n)%ze0, Atm(n)%flagstruct%hybrid_z,    &
                      Atm(n)%gridstruct, Atm(n)%flagstruct,                            &
@@ -284,7 +286,9 @@ contains
                      Atm(n)%delz, Atm(n)%flagstruct%hydrostatic, Atm(n)%flagstruct%duogrid,         &
                      Atm(n)%pt, Atm(n)%delp, Atm(n)%q, Atm(n)%ps,                     &
                      Atm(n)%pe, Atm(n)%pk, Atm(n)%peln, Atm(n)%pkz, Atm(n)%phis,      &
-                     Atm(n)%q_con, Atm(n)%omga, Atm(n)%ua, Atm(n)%va, Atm(n)%uc, Atm(n)%vc, &
+                     Atm(n)%q_con, Atm(n)%omga, Atm(n)%ua, Atm(n)%va, Atm(n)%uc, Atm(n)%vc, Atm(n)%uc_old, Atm(n)%vc_old, &
+                     Atm(n)%forcing_uc, Atm(n)%forcing_vc, Atm(n)%forcing_ud, Atm(n)%forcing_vd, &
+                     Atm(n)%forcing_delp, &
                      Atm(n)%ak, Atm(n)%bk, Atm(n)%mfx, Atm(n)%mfy,                    &
                      Atm(n)%cx, Atm(n)%cy, Atm(n)%ze0, Atm(n)%flagstruct%hybrid_z,    &
                      Atm(n)%gridstruct, Atm(n)%flagstruct,                            &
@@ -331,7 +335,9 @@ contains
                      Atm(n)%delz, Atm(n)%flagstruct%hydrostatic, Atm(n)%flagstruct%duogrid,         &
                      Atm(n)%pt, Atm(n)%delp, Atm(n)%q, Atm(n)%ps,                     &
                      Atm(n)%pe, Atm(n)%pk, Atm(n)%peln, Atm(n)%pkz, Atm(n)%phis,      &
-                     Atm(n)%q_con, Atm(n)%omga, Atm(n)%ua, Atm(n)%va, Atm(n)%uc, Atm(n)%vc, &
+                     Atm(n)%q_con, Atm(n)%omga, Atm(n)%ua, Atm(n)%va, Atm(n)%uc, Atm(n)%vc, Atm(n)%uc_old, Atm(n)%vc_old, &
+                     Atm(n)%forcing_uc, Atm(n)%forcing_vc, Atm(n)%forcing_ud, Atm(n)%forcing_vd, &
+                     Atm(n)%forcing_delp, &
                      Atm(n)%ak, Atm(n)%bk, Atm(n)%mfx, Atm(n)%mfy,                    &
                      Atm(n)%cx, Atm(n)%cy, Atm(n)%ze0, Atm(n)%flagstruct%hybrid_z,    &
                      Atm(n)%gridstruct, Atm(n)%flagstruct,                            &
@@ -345,7 +351,9 @@ contains
                      Atm(n)%delz, Atm(n)%flagstruct%hydrostatic, Atm(n)%flagstruct%duogrid,         &
                      Atm(n)%pt, Atm(n)%delp, Atm(n)%q, Atm(n)%ps,                     &
                      Atm(n)%pe, Atm(n)%pk, Atm(n)%peln, Atm(n)%pkz, Atm(n)%phis,      &
-                     Atm(n)%q_con, Atm(n)%omga, Atm(n)%ua, Atm(n)%va, Atm(n)%uc, Atm(n)%vc, &
+                     Atm(n)%q_con, Atm(n)%omga, Atm(n)%ua, Atm(n)%va, Atm(n)%uc, Atm(n)%vc, Atm(n)%uc_old, Atm(n)%vc_old, &
+                     Atm(n)%forcing_uc, Atm(n)%forcing_vc, Atm(n)%forcing_ud, Atm(n)%forcing_vd, &
+                     Atm(n)%forcing_delp, &
                      Atm(n)%ak, Atm(n)%bk, Atm(n)%mfx, Atm(n)%mfy,                    &
                      Atm(n)%cx, Atm(n)%cy, Atm(n)%ze0, Atm(n)%flagstruct%hybrid_z,    &
                      Atm(n)%gridstruct, Atm(n)%flagstruct,                            &
@@ -444,7 +452,9 @@ contains
             Atm(n)%u, Atm(n)%v, Atm(n)%w, Atm(n)%delz,       &
             Atm(n)%flagstruct%hydrostatic, Atm(n)%flagstruct%duogrid, Atm(n)%pt, Atm(n)%delp, Atm(n)%q, Atm(n)%ps, &
             Atm(n)%pe, Atm(n)%pk, Atm(n)%peln, Atm(n)%pkz,             &
-            Atm(n)%phis, Atm(n)%q_con, Atm(n)%omga, Atm(n)%ua, Atm(n)%va, Atm(n)%uc, Atm(n)%vc,  &
+            Atm(n)%phis, Atm(n)%q_con, Atm(n)%omga, Atm(n)%ua, Atm(n)%va, Atm(n)%uc, Atm(n)%vc, Atm(n)%uc_old, Atm(n)%vc_old,  &
+            Atm(n)%forcing_uc, Atm(n)%forcing_vc, Atm(n)%forcing_ud, Atm(n)%forcing_vd, &
+            Atm(n)%forcing_delp, &
             Atm(n)%ak, Atm(n)%bk, Atm(n)%mfx, Atm(n)%mfy, Atm(n)%cx, Atm(n)%cy,    &
             Atm(n)%ze0, Atm(n)%flagstruct%hybrid_z, Atm(n)%gridstruct, Atm(n)%flagstruct, &
             Atm(n)%neststruct, Atm(n)%idiag, Atm(n)%bd, Atm(n)%parent_grid, Atm(n)%domain, &

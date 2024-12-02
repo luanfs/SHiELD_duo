@@ -25,6 +25,7 @@ module sw_core_mod
  use fv_mp_mod, only: fill_corners, XDir, YDir
  use fv_arrays_mod, only: fv_grid_type, fv_grid_bounds_type, fv_flags_type
  use a2b_edge_mod, only: a2b_ord4
+ use mpp_mod,            only: mpp_pe
 
 #ifdef SW_DYNAMICS
  use test_cases_mod,   only: test_case
@@ -76,13 +77,13 @@ module sw_core_mod
   contains
 
 
-   subroutine c_sw(delpc, delp, ptc, pt, u,v, w, uc,vc, ua,va, wc,  &
+   subroutine c_sw(delpc, delp, ptc, pt, u,v, w, uc,vc, uc_old,vc_old, ua,va, wc,  &
                    ut, vt, divg_d, nord, dt2, hydrostatic, dord4, &
                    bd, gridstruct, flagstruct)
 
       type(fv_grid_bounds_type), intent(IN) :: bd
-      real, intent(INOUT), dimension(bd%isd:bd%ied,  bd%jsd:bd%jed+1) :: u, vc
-      real, intent(INOUT), dimension(bd%isd:bd%ied+1,bd%jsd:bd%jed  ) :: v, uc
+      real, intent(INOUT), dimension(bd%isd:bd%ied,  bd%jsd:bd%jed+1) :: u, vc, vc_old
+      real, intent(INOUT), dimension(bd%isd:bd%ied+1,bd%jsd:bd%jed  ) :: v, uc, uc_old
       real, intent(INOUT), dimension(bd%isd:bd%ied,  bd%jsd:bd%jed  ) :: delp,  pt,  ua, va, ut, vt
       real, intent(INOUT), dimension(bd%isd:      ,  bd%jsd:        ) :: w
       real, intent(OUT  ), dimension(bd%isd:bd%ied,  bd%jsd:bd%jed  ) :: delpc, ptc, wc
@@ -149,6 +150,9 @@ module sw_core_mod
       !                npx, npy, bounded_domain, flagstruct%grid_type)
       call d2a2c_vect(u, v, ua, va, uc, vc, ut, vt, dord4, gridstruct, bd, &
                       npx, npy, .false., flagstruct%grid_type)
+
+      uc_old(:,:) = uc(:,:)
+      vc_old(:,:) = vc(:,:)
 
       if( nord > 0 ) then
          if (bounded_domain .and.  ( .not. flagstruct%duogrid )) then
@@ -497,9 +501,10 @@ endif
 
 !     d_sw :: D-Grid Shallow Water Routine
 
-   subroutine d_sw1( delp, pt, w, uc,vc, &
+   subroutine d_sw1( delp, pt, w, uc,vc, uc_old,vc_old, &
                     xflux, yflux, cx, cy,              &
-                   crx_adv, cry_adv,  xfx_adv, yfx_adv, q_con,     &
+                   crx_adv, cry_adv,  xfx_adv, yfx_adv,   &
+                   crx_dp2, cry_dp2,  xfx_dp2, yfx_dp2, q_con,     &
                     nq, q, k, km, inline_q,  &
                    dt, hord_tr, hord_vt, hord_tm, hord_dp,   &
                    nord_v, nord_t, damp_v, &
@@ -515,8 +520,8 @@ endif
       type(fv_grid_bounds_type), intent(IN) :: bd
       real, intent(INOUT), dimension(bd%isd:bd%ied,  bd%jsd:bd%jed):: delp, pt
       real, intent(INOUT), dimension(bd%isd:      ,  bd%jsd:      ):: w, q_con
-      real, intent(INOUT), dimension(bd%isd:bd%ied  ,bd%jsd:bd%jed+1):: vc
-      real, intent(INOUT), dimension(bd%isd:bd%ied+1,bd%jsd:bd%jed  ):: uc
+      real, intent(INOUT), dimension(bd%isd:bd%ied  ,bd%jsd:bd%jed+1):: vc, vc_old
+      real, intent(INOUT), dimension(bd%isd:bd%ied+1,bd%jsd:bd%jed  ):: uc, uc_old
       real, intent(INOUT):: q(bd%isd:bd%ied,bd%jsd:bd%jed,km,nq)
 ! The flux capacitors:
       real, intent(INOUT):: xflux(bd%is:bd%ie+1,bd%js:bd%je  )
@@ -528,6 +533,8 @@ endif
       logical, intent(IN):: inline_q
       real, intent(OUT), dimension(bd%is:bd%ie+1,bd%jsd:bd%jed):: crx_adv, xfx_adv
       real, intent(OUT), dimension(bd%isd:bd%ied,bd%js:bd%je+1):: cry_adv, yfx_adv
+      real, intent(OUT), dimension(bd%is:bd%ie+1,bd%jsd:bd%jed):: crx_dp2, xfx_dp2
+      real, intent(OUT), dimension(bd%isd:bd%ied,bd%js:bd%je+1):: cry_dp2, yfx_dp2
       real,intent(out) ::   allflux_x(bd%is:bd%ie+1,bd%js:bd%je,km,4+nq  )  ! 1-D X-direction Fluxes
       real,intent(out) ::   allflux_y(bd%is:bd%ie  ,bd%js:bd%je+1,km,4+nq)  ! 1-D Y-direction Fluxes
       real,intent(out) :: ra_x(bd%is:bd%ie,bd%jsd:bd%jed)
@@ -542,6 +549,8 @@ endif
       real ::   fy(bd%is:bd%ie  ,bd%js:bd%je+1)  ! 1-D Y-direction Fluxes
       real :: gx(bd%is:bd%ie+1,bd%js:bd%je  )
       real :: gy(bd%is:bd%ie  ,bd%js:bd%je+1)  ! work Y-dir flux array
+      real :: ut_old(bd%isd:bd%ied+1,bd%jsd:bd%jed)
+      real :: vt_old(bd%isd:bd%ied,  bd%jsd:bd%jed+1)
 
       real :: damp
       integer :: i,j, iq
@@ -590,10 +599,10 @@ endif
       ne_corner = gridstruct%ne_corner
 
 #ifdef SW_DYNAMICS
-      if ( test_case == 1 ) then
+      if ( test_case <= 1 ) then
         do j=jsd,jed
            do i=is,ie+1
-              xfx_adv(i,j) = dt * uc(i,j) / sina_u(i,j)
+              xfx_adv(i,j) = dt * uc(i,j)! / sina_u(i,j)
               if (xfx_adv(i,j) > 0.) then
                   crx_adv(i,j) = xfx_adv(i,j) * rdxa(i-1,j)
               else
@@ -605,7 +614,7 @@ endif
 
         do j=js,je+1
            do i=isd,ied
-              yfx_adv(i,j) = dt * vc(i,j) / sina_v(i,j)
+              yfx_adv(i,j) = dt * vc(i,j)! / sina_v(i,j)
               if (yfx_adv(i,j) > 0.) then
                  cry_adv(i,j) = yfx_adv(i,j) * rdya(i,j-1)
               else
@@ -614,6 +623,13 @@ endif
               yfx_adv(i,j) = dx(i,j)*yfx_adv(i,j)*sina_v(i,j)
            enddo
         enddo
+
+       if(gridstruct%adv_scheme==2) then
+           call departure_cfl_rk2(gridstruct, flagstruct, bd, crx_dp2, cry_dp2, &
+                             uc_old, vc_old, uc, vc, dt)
+           call compute_xfx_yfx_rk2(gridstruct, flagstruct, bd, crx_dp2, cry_dp2, xfx_dp2, yfx_dp2)
+       endif 
+
       else
 #endif
      if ( flagstruct%grid_type < 3 ) then
@@ -621,12 +637,14 @@ endif
 !!! TO DO: separate versions for nesting and for cubed-sphere
         if (bounded_domain .or. (flagstruct%duogrid)) then
            do j=jsd,jed
-              do i=is,ie+1
+              !do i=is,ie+1 !rk2
+              do i=is-1,ie+2
                  ut(i,j) = ( uc(i,j) - 0.25 * cosa_u(i,j) *     &
                       (vc(i-1,j)+vc(i,j)+vc(i-1,j+1)+vc(i,j+1)))*rsin_u(i,j)
               enddo
            enddo
-           do j=js,je+1
+           !do j=js,je+1 !rk2
+           do j=js-1,je+2
               do i=isd,ied
                  vt(i,j) = ( vc(i,j) - 0.25 * cosa_v(i,j) *     &
                       (uc(i,j-1)+uc(i+1,j-1)+uc(i,j)+uc(i+1,j)))*rsin_v(i,j)
@@ -867,6 +885,13 @@ endif
            enddo
         enddo
 
+        if(gridstruct%adv_scheme==2) then
+           call compute_ut_vt( uc_old, vc_old, ut_old, vt_old, dt, gridstruct, flagstruct, bd)
+           call departure_cfl_rk2(gridstruct, flagstruct, bd, crx_dp2, cry_dp2, &
+                             ut_old, vt_old, ut, vt, dt)
+           call compute_xfx_yfx_rk2(gridstruct, flagstruct, bd, crx_dp2, cry_dp2, xfx_dp2, yfx_dp2)
+        endif
+
 #ifdef SW_DYNAMICS
       endif
 #endif
@@ -882,10 +907,14 @@ endif
          enddo
       enddo
 
-
-      call fv_tp_2d(delp, crx_adv, cry_adv, npx, npy, hord_dp, fx, fy,  &
-                    xfx_adv,yfx_adv, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac, nord=nord_v, damp_c=damp_v)
-
+      if(gridstruct%adv_scheme==1) then
+         call fv_tp_2d(delp, crx_adv, cry_adv, npx, npy, hord_dp, fx, fy,  &
+                   xfx_adv,yfx_adv, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac, nord=nord_v, damp_c=damp_v)
+      else if(gridstruct%adv_scheme==2) then
+         call fv_tp_2d(delp, crx_dp2, cry_dp2, npx, npy, hord_dp, fx, fy,  &
+                    xfx_dp2,yfx_dp2, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac, nord=nord_v, damp_c=damp_v, &
+                    advscheme=gridstruct%adv_scheme)
+      endif
 
         do j=js,je
            do i=is,ie+1
@@ -921,6 +950,7 @@ endif
 
 #ifndef SW_DYNAMICS
        if ( .not. hydrostatic ) then
+            ! not used in sw
             call fv_tp_2d(w, crx_adv,cry_adv, npx, npy, hord_vt, gx, gy, xfx_adv, yfx_adv, &
                           gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac, mfx=fx, mfy=fy)
 
@@ -939,6 +969,7 @@ endif
         endif
 
 #ifdef USE_COND
+           ! not used in sw
            call fv_tp_2d(q_con, crx_adv,cry_adv, npx, npy, hord_dp, gx, gy,  &
                 xfx_adv,yfx_adv, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac, mfx=fx, mfy=fy, mass=delp, nord=nord_t, damp_c=damp_t)
 
@@ -955,7 +986,7 @@ endif
         enddo
 
 #endif
-
+        ! not used in sw
         call fv_tp_2d(pt, crx_adv,cry_adv, npx, npy, hord_tm, gx, gy,  &
                       xfx_adv,yfx_adv, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac, &
                       mfx=fx, mfy=fy, mass=delp, nord=nord_v, damp_c=damp_v)
@@ -976,9 +1007,21 @@ endif
 
      if ( inline_q ) then
         do iq=1,nq
-           call fv_tp_2d(q(isd,jsd,k,iq), crx_adv,cry_adv, npx, npy, hord_tr, gx, gy,  &
-                         xfx_adv,yfx_adv, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac, &
-                         mfx=fx, mfy=fy, mass=delp, nord=nord_t, damp_c=damp_t)
+         if(test_case>1) then
+            ! used in sw
+            call fv_tp_2d(q(isd,jsd,k,iq), crx_adv,cry_adv, npx, npy, hord_tr, gx, gy,  &
+                            xfx_adv, yfx_adv, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac, &
+                            mfx=fx, mfy=fy, mass=delp, nord=nord_t, damp_c=damp_t)
+         else
+            if(gridstruct%adv_scheme==1) then
+               call fv_tp_2d(q(isd,jsd,k,iq), crx_adv, cry_adv, npx, npy, hord_tr, gx, gy, &
+                           xfx_adv, yfx_adv, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac)
+            else if(gridstruct%adv_scheme==2) then
+               call fv_tp_2d(q(isd,jsd,k,iq), crx_dp2, cry_dp2, npx, npy, hord_tr, gx, gy, &
+                           xfx_dp2, yfx_dp2, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac, advscheme=gridstruct%adv_scheme)
+            endif
+         endif
+
 
         do j=js,je
            do i=is,ie+1
@@ -1175,12 +1218,20 @@ endif
            enddo
         enddo
 
+         if(test_case>1) then
            do j=js,je
               do i=is,ie
                  q(i,j,k,iq) = (q(i,j,k,iq)*wk(i,j) +               &
                          (gx(i,j)-gx(i+1,j)+gy(i,j)-gy(i,j+1))*rarea(i,j))/delp(i,j)
               enddo
            enddo
+         else
+           do j=js,je
+              do i=is,ie
+                 q(i,j,k,iq) = q(i,j,k,iq) + (gx(i,j)-gx(i+1,j)+gy(i,j)-gy(i,j+1))*rarea(i,j)
+              enddo
+           enddo
+         endif
         enddo
 !     if ( zvir>0.01 ) then
 !       do j=js,je
@@ -1486,7 +1537,8 @@ enddo
 
    subroutine d_sw5(delpc, delp,  ptc, u,  v, w, uc,vc, &
                    ua, va, divg_d,              &
-                   crx_adv, cry_adv,  xfx_adv, yfx_adv, q_con, z_rat,     &
+                   crx_adv, cry_adv,  xfx_adv, yfx_adv,  &
+                   crx_dp2, cry_dp2,  xfx_dp2, yfx_dp2, q_con, z_rat,     &
                    dt, hord_vt, nord,   &
                     dddmp, d2_bg, d4_bg, damp_w, &
                     d_con, hydrostatic, gridstruct, flagstruct, bd,  &
@@ -1508,6 +1560,9 @@ enddo
       logical, intent(IN):: hydrostatic
       real, intent(OUT), dimension(bd%is:bd%ie+1,bd%jsd:bd%jed):: crx_adv, xfx_adv
       real, intent(OUT), dimension(bd%isd:bd%ied,bd%js:bd%je+1):: cry_adv, yfx_adv
+      real, intent(OUT), dimension(bd%is:bd%ie+1,bd%jsd:bd%jed):: crx_dp2, xfx_dp2
+      real, intent(OUT), dimension(bd%isd:bd%ied,bd%js:bd%je+1):: cry_dp2, yfx_dp2
+
 
       real,intent(out) ::   vortfluxx(bd%is:bd%ie+1,bd%js:bd%je  )  ! 1-D X-direction Fluxes
       real,intent(out) ::   vortfluxy(bd%is:bd%ie  ,bd%js:bd%je+1)  ! 1-D Y-direction Fluxes
@@ -1869,9 +1924,18 @@ endif
    endif
 
    ! This vort is not needed as 'out' but the fluxes are instead
-    call fv_tp_2d(vort, crx_adv, cry_adv, npx, npy, hord_vt, vortfluxx, vortfluxy, &
+   if(gridstruct%adv_scheme==1) then
+      call fv_tp_2d(vort, crx_adv, cry_adv, npx, npy, hord_vt, vortfluxx, vortfluxy, &
                   xfx_adv,yfx_adv, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac)
-!
+   else if(gridstruct%adv_scheme==2) then
+      !call fv_tp_2d(vort, crx_adv, cry_adv, npx, npy, hord_vt, vortfluxx, vortfluxy, &
+      !            xfx_adv,yfx_adv, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac)
+      call fv_tp_2d(vort, crx_dp2, cry_dp2, npx, npy, hord_vt, vortfluxx, vortfluxy, &
+                  xfx_dp2,yfx_dp2, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac, advscheme=gridstruct%adv_scheme)
+   endif
+
+
+
 
 #ifdef SW_DYNAMICS
      endif
@@ -3552,7 +3616,8 @@ end subroutine ytp_v
 !---------------------------------------------
 ! 4th order interpolation for interior points:
 !---------------------------------------------
-     do j=js-1,je+1
+     !do j=js-1,je+1
+     do j=jsd,jed
         do i=ifirst,ilast
            uc(i,j) = a2*(utmp(i-2,j)+utmp(i+1,j)) + a1*(utmp(i-1,j)+utmp(i,j))
            ut(i,j) = (uc(i,j) - v(i,j)*cosa_u(i,j))*rsin_u(i,j)
@@ -3692,8 +3757,10 @@ end subroutine ytp_v
      enddo
  else
 ! 4th order interpolation:
+       !do j=js-1,je+2
        do j=js-1,je+2
-          do i=is-1,ie+1
+          !do i=is-1,ie+1
+          do i=isd,ied
              vc(i,j) = a2*(vtmp(i,j-2)+vtmp(i,j+1)) + a1*(vtmp(i,j-1)+vtmp(i,j))
              vt(i,j) = vc(i,j)
           enddo
@@ -3912,4 +3979,233 @@ end subroutine ytp_v
 
  end subroutine fill_4corners
 
+subroutine departure_cfl_rk2(gridstruct, flagstruct, bd, crx, cry, &
+                             uc_old, vc_old, uc, vc, dt)
+    !--------------------------------------------------
+    ! Compute the departure CFL for RK2 scheme
+    !--------------------------------------------------
+    type(fv_grid_bounds_type), intent(IN) :: bd
+    type(fv_grid_type), intent(IN), target :: gridstruct 
+    type(fv_flags_type), intent(IN), target :: flagstruct
+
+    real, intent(INOUT), dimension(bd%is:bd%ie+1, bd%jsd:bd%jed  ) :: crx
+    real, intent(INOUT), dimension(bd%isd:bd%ied, bd%js:bd%je+1  ) :: cry
+
+    real, intent(IN)   , dimension(bd%isd:bd%ied+1, bd%jsd:bd%jed  ) :: uc_old
+    real, intent(IN)   , dimension(bd%isd:bd%ied  , bd%jsd:bd%jed+1) :: vc_old
+
+    real, intent(IN)   , dimension(bd%isd:bd%ied+1, bd%jsd:bd%jed  ) :: uc
+    real, intent(IN)   , dimension(bd%isd:bd%ied  , bd%jsd:bd%jed+1) :: vc
+
+    real, dimension(bd%is-1:bd%ie+2  , bd%jsd:bd%jed  ) :: crx_time_centered
+    real, dimension(bd%isd:bd%ied  , bd%js-1:bd%je+2  ) :: cry_time_centered
+    real, dimension(bd%is:bd%ie+1  , bd%jsd:bd%jed  ) :: crx_old
+    real, dimension(bd%isd:bd%ied  , bd%js:bd%je+1  ) :: cry_old
+
+    real, dimension(bd%isd:bd%ied+1, bd%jsd:bd%jed  ) :: uc_av
+    real, dimension(bd%isd:bd%ied  , bd%jsd:bd%jed+1) :: vc_av
+ 
+    real, pointer, dimension(:) :: rdxa , rdya
+    real, pointer, dimension(:) :: rdxc , rdyc
+    real, pointer, dimension(:,:) :: rnorm_tgx_c, rnorm_tgy_d
+    real, pointer, dimension(:,:) ::  norm_tgx_c,  norm_tgy_d
+    real, intent(IN) :: dt
+
+    ! aux
+    real :: a, a1, a2, c1, c2, u1, u2, v1, v2
+    integer :: i, j
+    integer :: is,  ie,  js,  je
+    integer :: isd, ied, jsd, jed
+
+    is  = bd%is
+    ie  = bd%ie
+    js  = bd%js
+    je  = bd%je
+    isd = bd%isd
+    ied = bd%ied
+    jsd = bd%jsd
+    jed = bd%jed
+
+    rdxc => gridstruct%rdx_cs
+    rdyc => gridstruct%rdy_cs
+    rdxa => gridstruct%rdxa_cs
+    rdya => gridstruct%rdya_cs
+    rnorm_tgx_c => gridstruct%rnorm_tgx_c
+    rnorm_tgy_d => gridstruct%rnorm_tgy_d
+     norm_tgx_c => gridstruct% norm_tgx_c
+     norm_tgy_d => gridstruct% norm_tgy_d
+
+    ! CFL for RK2
+    !call  compute_cfl(gridstruct, bd, crx_old          , cry_old          , uc_old, vc_old, dt, 0)
+    !call  compute_cfl(gridstruct, bd, crx_time_centered, cry_time_centered, uc    , vc    , dt, 1)
+
+     ! RK2
+     do j = jsd, jed
+        do i = is, ie+1
+           ! Upwind linear interpolation
+           if (uc_old(i,j)>0.d0) then
+              u1 = uc(i-1,j)*rnorm_tgx_c(i-1,j)
+              u2 = uc(i  ,j)*rnorm_tgx_c(i  ,j)
+              a  = uc_old(i,j)*dt*rdxa(i-1)*rnorm_tgx_c(i,j)*0.5d0
+              a1 = a
+              a2 = 1.d0-a
+           else
+              u1 = uc(i  ,j)*rnorm_tgx_c(i  ,j)
+              u2 = uc(i+1,j)*rnorm_tgx_c(i+1,j)
+              a  = uc_old(i,j)*dt*rdxa(i)*rnorm_tgx_c(i,j)*0.5d0
+              a1 = 1.d0+a
+              a2 = -a
+           end if
+           uc_av(i,j) = a1*u1 + a2*u2
+           crx(i,j) = uc_av(i,j)*dt*rdxc(i)
+        end do
+     end do
+
+     ! cfl for dp in y direction
+     do j = js, je+1
+        do i = isd, ied
+           ! Upwind linear interpolation
+           if (vc_old(i,j)>0.d0) then
+              v1 = vc(i,j-1)*rnorm_tgy_d(i,j-1)
+              v2 = vc(i,j  )*rnorm_tgy_d(i,j)
+              a  = vc_old(i,j)*dt*rdya(j-1)*rnorm_tgy_d(i,j)*0.5d0
+              a1 = a
+              a2 = 1.d0-a
+           else
+              v1 = vc(i,j  )*rnorm_tgy_d(i,j)
+              v2 = vc(i,j+1)*rnorm_tgy_d(i,j+1)
+              a  = vc_old(i,j)*dt*rdya(j)*rnorm_tgy_d(i,j)*0.5d0
+              a1 = 1.d0+a
+              a2 = -a
+           end if
+           vc_av(i,j) = a1*v1 + a2*v2
+           cry(i,j) = vc_av(i,j)*dt*rdyc(j)
+        end do
+     end do
+
+
+end subroutine departure_cfl_rk2
+
+subroutine compute_xfx_yfx_rk2(gridstruct, flagstruct, bd, crx, cry, xfx, yfx)
+    !--------------------------------------------------
+    ! Compute coefficients xfx and yfx
+    !
+    !--------------------------------------------------
+    type(fv_grid_bounds_type), intent(IN) :: bd
+    type(fv_grid_type), intent(IN), target :: gridstruct 
+    type(fv_flags_type), intent(IN), target :: flagstruct
+
+    real, intent(IN)   , dimension(bd%is:bd%ie+1  , bd%jsd:bd%jed  ) :: crx
+    real, intent(INOUT), dimension(bd%is:bd%ie+1  , bd%jsd:bd%jed  ) :: xfx
+
+    real, intent(IN)   , dimension(bd%isd:bd%ied  , bd%js:bd%je+1  ) :: cry
+    real, intent(INOUT), dimension(bd%isd:bd%ied  , bd%js:bd%je+1  ) :: yfx
+
+    ! aux
+    integer :: i, j
+    integer :: is,  ie,  js,  je
+    integer :: isd, ied, jsd, jed
+    real, pointer, dimension(:)   :: dxa, dya
+    real, pointer, dimension(:)   :: dxc, dyc
+
+    is  = bd%is
+    ie  = bd%ie
+    js  = bd%js
+    je  = bd%je
+    isd = bd%isd
+    ied = bd%ied
+    jsd = bd%jsd
+    jed = bd%jed
+
+    dxa => gridstruct%dxa_cs
+    dya => gridstruct%dya_cs
+    dxc => gridstruct%dx_cs
+    dyc => gridstruct%dy_cs
+ 
+    do j=jsd,jed
+    !DEC$ VECTOR ALWAYS
+       do i=is,ie+1
+          xfx(i,j) = crx(i,j)*dxc(i)*dya(j)
+       enddo
+
+    enddo
+    do j=js,je+1
+    !DEC$ VECTOR ALWAYS
+       do i=isd,ied
+          yfx(i,j) = cry(i,j)*dxa(i)*dyc(j)
+       enddo
+    enddo
+
+
+end subroutine compute_xfx_yfx_rk2
+
+
+subroutine compute_ut_vt( uc, vc, ut, vt, dt, gridstruct, flagstruct, bd)
+    real   , intent(IN):: dt
+    type(fv_grid_bounds_type), intent(IN) :: bd
+    real, intent(IN), dimension(bd%isd:bd%ied  ,bd%jsd:bd%jed+1):: vc
+    real, intent(IN), dimension(bd%isd:bd%ied+1,bd%jsd:bd%jed  ):: uc
+    real,intent(out) :: ut(bd%isd:bd%ied+1,bd%jsd:bd%jed)
+    real,intent(out) :: vt(bd%isd:bd%ied,  bd%jsd:bd%jed+1)
+    type(fv_grid_type), intent(IN), target :: gridstruct
+    type(fv_flags_type), intent(IN), target :: flagstruct
+    ! Local:
+    logical:: sw_corner, se_corner, ne_corner, nw_corner
+    real :: damp
+    integer :: i,j, iq
+    real, pointer, dimension(:,:,:) :: sin_sg
+    real, pointer, dimension(:,:)   :: cosa_u, cosa_v
+    real, pointer, dimension(:,:)   :: sina_u, sina_v
+    real, pointer, dimension(:,:)   :: rsin_u, rsin_v
+
+    integer :: is,  ie,  js,  je
+    integer :: isd, ied, jsd, jed
+    integer :: npx, npy, h
+    logical :: bounded_domain
+
+    is  = bd%is
+    ie  = bd%ie
+    js  = bd%js
+    je  = bd%je
+    isd = bd%isd
+    ied = bd%ied
+    jsd = bd%jsd
+    jed = bd%jed
+
+    npx      = flagstruct%npx
+    npy      = flagstruct%npy
+    bounded_domain = gridstruct%bounded_domain
+
+    sin_sg    => gridstruct%sin_sg
+    cosa_u    => gridstruct%cosa_u
+    cosa_v    => gridstruct%cosa_v
+    sina_u    => gridstruct%sina_u
+    sina_v    => gridstruct%sina_v
+    rsin_u    => gridstruct%rsin_u
+    rsin_v    => gridstruct%rsin_v
+
+    sw_corner = gridstruct%sw_corner
+    se_corner = gridstruct%se_corner
+    nw_corner = gridstruct%nw_corner
+    ne_corner = gridstruct%ne_corner
+
+    if (bounded_domain .or. (flagstruct%duogrid)) then
+       h = 1
+       do j=jsd,jed
+          do i=is-h,ie+h+1
+             ut(i,j) = ( uc(i,j) - 0.25 * cosa_u(i,j) *     &
+                  (vc(i-1,j)+vc(i,j)+vc(i-1,j+1)+vc(i,j+1)))*rsin_u(i,j)
+          enddo
+          !if(mpp_pe()==0) print*,'--', j, ut(is-1:ie+2,j)
+       enddo
+       do j=js-h,je+h+1
+          do i=isd,ied
+             vt(i,j) = ( vc(i,j) - 0.25 * cosa_v(i,j) *     &
+                  (uc(i,j-1)+uc(i+1,j-1)+uc(i,j)+uc(i+1,j)))*rsin_v(i,j)
+          enddo
+          !if(mpp_pe()==0) print*,'--', j, vt(isd:ied,j)
+       enddo
+    endif
+    !if(mpp_pe()==0) stop
+end subroutine compute_ut_vt
  end module sw_core_mod
