@@ -694,6 +694,7 @@ endif
 
                         if (.not. duogrid)   call complete_group_halo_update(i_pack(9), domain)
                         if (duogrid)     call ext_vector(uc, vc, gridstruct%dg, bd, domain,gridstruct, flagstruct,1,0,0,1)
+                        if (duogrid)     call ext_vector(uc_old, vc_old, gridstruct%dg, bd, domain,gridstruct, flagstruct,1,0,0,1)
 #ifdef SW_DYNAMICS
     endif
 #endif
