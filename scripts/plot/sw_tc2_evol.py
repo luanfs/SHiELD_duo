@@ -49,6 +49,10 @@ if tc == 2:
 else:
    dds = (0,)
 
+# vorticity damping (same size as hords)
+vds = (0.06,0)
+
+
 #--------------------------------------------------------------------------------------------------------
 
 # basename used in outputs
@@ -61,7 +65,7 @@ elif tc==2 :
     basename='geobalance'
     alpha = 45
     #alpha = 0
-    Tf = 1
+    Tf = 15
 
 elif tc==-3:
     basename='gaussian-zonal'
@@ -90,6 +94,7 @@ for g in range(0, len(gtypes)):
  gtype = gtypes[g]
  for k in range(0, len(hords)):
    hord = hords[k]
+   vd = str(vds[k])
    for d in range(0, len(dds)):
      dd = str(dds[d])
      for m in range(0, M):
@@ -129,17 +134,17 @@ for g in range(0, len(gtypes)):
        #print(adv, advname)
        #------------------------------------------------------------------------------------------------
        # Directory where the netcdf files are
-       if tc>1:
-         filepath = datadir+"C"+str(N)+".sw."+basename+".tc"+str(tc)+".alpha"+str(alpha)\
-           +".g"+str(gtype)+"."+dg+".adv"+str(adv)+".hord"+str(hord)+'.dd'+str(dd)+".mf"+str(mf)+".tf"+str(Tf)+"/rundir/"
-       else:
-         filepath = datadir+"C"+str(N)+".sw."+basename+".tc"+str(tc)+".alpha"+str(alpha)\
-       +".g"+str(gtype)+"."+dg+".adv"+str(adv)+".hord"+str(hord)+".mf"+str(mf)+".tf"+str(Tf)+"/rundir/"
+       #filepath = datadir+"C"+str(N)+".sw."+basename+".tc"+str(tc)+".alpha"+str(alpha)\
+       #+".g"+str(gtype)+"."+dg+".adv"+str(adv)+".hord"+str(hord)+".mf"+str(mf)+".tf"+str(Tf)+"/rundir/"
+       filepath = datadir+"C"+str(N)+".sw."+basename+".tc"+str(tc)+".alpha"+str(alpha)\
+       +".g"+str(gtype)+"."+dg+".adv"+str(adv)+".hord"+str(hord)+'.dd'+dd+'.vd'+vd\
+       +".mf"+mf+".tf"+str(Tf)+"/rundir/"
+ 
 
-       schemes_label.append(advname+"."+hord_name+".mf"+str(mf))
+       schemes_label.append(advname+"."+hord_name)
        #schemes_label.append(advname+"."+hord_name)
        #schemes_label.append(advname+"."+hord_name+".dd"+str(dd))
-       print("g"+str(gtype)+'.'+advname+"."+hord_name+".mf"+str(mf))
+       print("g"+str(gtype)+'.'+advname+"."+hord_name)
        #print("g"+str(gtype)+'.'+advname+"."+hord_name+".dd"+str(dd))
        file = filepath+"error_delp.txt"
        errors = np.loadtxt(file)

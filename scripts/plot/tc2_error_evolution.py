@@ -12,35 +12,38 @@ figformat='png'
 # value of N
 #N = 192
 #N = 384
-#N = 768
+N = 768
 #N = 48
-N = 96
+#N = 96
 
 # advection scheme
-hords = (5,5,8,8,5)
-hords = (5,5,5)
+#hords = (5,5,8,8,5)
+hords = (5,5,8,8)
+#hords = (5,5,5)
 
 #2d adv scheme
-advs = (1,2,1,2,2)
-advs = (2,1,2)
+#advs = (1,2,1,2,2)
+advs = (1,2,1,2)
+#advs = (2,1,2)
 
 #grid type 0-equiedge; 2-equiangular
 gtypes = (0, 2)
-gtypes = (0,)
+#gtypes = (0,)
 #gtypes = (2,)
 
 
 #vort damp
-vds = (0,0.04,0,0,0)
-vds = (0,0,0.04)
+#vds = (0,0.04,0,0,0)
+#vds = (0,0,0.04)
+vds = (0,0,0,0,0)
 
 #duogrid scheme
 dg = 1
 
 #--------------------------------------------------------------------------------------------------------
-basename='geobalance'
+basename='geobalance.tc2'
 alpha = 45
-Tf = 100
+Tf = 1
 
 #--------------------------------------------------------------------------------------------------------
 # Error lists
@@ -76,7 +79,7 @@ for gtype in gtypes:
 
       # adv name
       if adv==1:
-        advname = 'FV3'
+        advname = 'PL07'
       elif adv==2:
         advname = 'LT2'
  
