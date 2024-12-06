@@ -1007,6 +1007,7 @@ endif
 
      if ( inline_q ) then
         do iq=1,nq
+#ifdef SW_DYNAMICS
          if(test_case>1) then
             ! used in sw
             call fv_tp_2d(q(isd,jsd,k,iq), crx_adv,cry_adv, npx, npy, hord_tr, gx, gy,  &
@@ -1021,7 +1022,12 @@ endif
                            xfx_dp2, yfx_dp2, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac, advscheme=gridstruct%adv_scheme)
             endif
          endif
-
+#else
+         call fv_tp_2d(q(isd,jsd,k,iq), crx_adv,cry_adv, npx, npy, hord_tr, gx, gy,  &
+                         xfx_adv, yfx_adv, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac, &
+                         mfx=fx, mfy=fy, mass=delp, nord=nord_t, damp_c=damp_t)
+ 
+#endif
 
         do j=js,je
            do i=is,ie+1
@@ -1218,6 +1224,7 @@ endif
            enddo
         enddo
 
+#ifdef SW_DYNAMICS
          if(test_case>1) then
            do j=js,je
               do i=is,ie
@@ -1232,7 +1239,16 @@ endif
               enddo
            enddo
          endif
+#else
+         do j=js,je
+            do i=is,ie
+               q(i,j,k,iq) = (q(i,j,k,iq)*wk(i,j) +               &
+                       (gx(i,j)-gx(i+1,j)+gy(i,j)-gy(i,j+1))*rarea(i,j))/delp(i,j)
+            enddo
+         enddo
+#endif
         enddo
+
 !     if ( zvir>0.01 ) then
 !       do j=js,je
 !          do i=is,ie
