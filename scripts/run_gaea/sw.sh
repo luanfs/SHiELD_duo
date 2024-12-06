@@ -21,8 +21,8 @@ cd -
 tc="2"
 
 # 1d advection scheme
-#hords=(5 8)
-hords=(8)
+hords=(5 8)
+#hords=(8)
 
 # 2d advection scheme
 #advs=(1 1 1 1 1 1)
@@ -66,6 +66,9 @@ else
 fi
 #dds=(0 0.12 0 0.12)
 
+# vorticity damping (same size of hords)
+vds=(0.06 0)
+
 # rotation angles
 alphas=(45 45 45 45 45 45 45 45)
 #alphas=(0 0 0 0 0 0)
@@ -74,7 +77,7 @@ alphas=(45 45 45 45 45 45 45 45)
 N=48
 
 #number of grids to be tested (we double the values N for each new grid and divide dt by 2)
-Ng=4
+Ng=5
 
 #----------------------------------------------------------------------------------------------
 
@@ -83,14 +86,14 @@ case $tc in
     #-------------SW tests-------------
     2)
     tcname="geobalance"
-    days="3"
+    days="15"
     dt=3600
     n_split=7
     ;;
 
     5)
     tcname="mountain"
-    days="14"
+    days="15"
     dt=1800
     n_split=7
     ;;
@@ -133,6 +136,7 @@ h=${#hords[@]}
 for ((j=1; j<=$Ng; j++)); do
     for ((k=0; k<=$h-1; k++)); do
         hord=${hords[k]}
+        vd=${vds[k]}
         for ((i=0; i<=size-1; i++)); do
             gtype=${gtypes[i]}
             dg=${dgs[i]}
@@ -145,7 +149,7 @@ for ((j=1; j<=$Ng; j++)); do
                 alpha=0
             fi
             # Run the code shallow water script
-            sbatch ./fv3_sw.csh $tc $N $dt $gtype $dg $tcname $alpha $days $hours $minutes $seconds $COMP $n_split $hord $dd $adv $mf
+            sbatch ./fv3_sw.csh $tc $N $dt $gtype $dg $tcname $alpha $days $hours $minutes $seconds $COMP $n_split $hord $adv $dd $vd $mf
             #echo N$N g$gtype dg$dg a$alpha dt$dt tc$tc
             #sleep 10
         done

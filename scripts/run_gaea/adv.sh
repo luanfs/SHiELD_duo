@@ -60,6 +60,9 @@ else
    dds=(0 0 0 0 0 0 0 0 0 0 0 0)
 fi
 
+# vorticity damping (same size of hords)
+vds=(0.06 0)
+
 # rotation angles
 alphas=(45 45 45 45 45 45 45 45)
 
@@ -162,6 +165,7 @@ h=${#hords[@]}
 for ((j=1; j<=$Ng; j++)); do
     for ((k=0; k<=$h-1; k++)); do
         hord=${hords[k]}
+        vd=${vds[k]}
         for ((i=0; i<=size-1; i++)); do
             gtype=${gtypes[i]}
             dg=${dgs[i]}
@@ -175,7 +179,7 @@ for ((j=1; j<=$Ng; j++)); do
             fi
             # Run the code shallow water script
             echo N$N g$gtype dg$dg a$alpha  tc$tc dt$dt
-            sbatch ./fv3_sw.csh $tc $N $dt $gtype $dg $tcname $alpha $days $hours $minutes $seconds $COMP $n_split $hord $dd $adv $mf
+            sbatch ./fv3_sw.csh $tc $N $dt $gtype $dg $tcname $alpha $days $hours $minutes $seconds $COMP $n_split $hord $adv $dd $vd $mf
 	    #exit
 
             #sleep 10

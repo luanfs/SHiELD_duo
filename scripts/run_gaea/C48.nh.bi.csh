@@ -1,61 +1,70 @@
 #!/bin/tcsh 
 #SBATCH --output=/ncrc/home2/Luan.Santos/SHiELD_duo/scripts/run_gaea/stdout/%x.o%j
-#SBATCH --job-name=solo.sw
+#SBATCH --job-name=solo.nh
 #SBATCH --partition=batch
 #SBATCH --qos=urgent
 #SBATCH --account=gfdl_w
-#SBATCH --time=1:30:00
+#SBATCH --time=1:00:00
 #SBATCH --cluster=c5
-#SBATCH --nodes=10
-
-
-set echo
-# Check if 18 command-line arguments are provided
-if ($#argv != 18) then
-  echo "Usage: ./sw.sh tc N dt gtype duogrid tcname alpha days hours minutes seconds comp nsplit hord adv dd vd mf"  
-endif
-# Assign the command-line arguments to variables
-set tc="$1"
-set N="$2"
-set dt_atmos="$3"
-set gtype="$4"
-set dg="$5"
-set tcname="$6"
-set alpha="$7"
-set days="${8}"
-set hours="${9}"
-set minutes="${10}"
-set seconds="${11}"
-set COMP="${12}"
-set n_split="${13}"
-set hord="${14}"
-set adv="${15}"
-set dd="${16}"
-set vd="${17}"
-set mf="${18}"
-@ plotfreq = $days * 1
-#set plotfreq=$((days * 1))
+#SBATCH --ntasks=1000
 
 set BUILD_AREA = "/ncrc/home2/Luan.Santos/SHiELD_duo/SHiELD_build" 
 set SCRATCHROOT = "/gpfs/f5/gfdl_w/scratch/Luan.Santos"
-set SCRIPT_AREA = /ncrc/home2/Luan.Santos/SHiELD_duo/SHiELD_run
+set SCRIPT_AREA = /ncrc/home2/Luan.Santos/SHiELD_duo/SHiELD_build
+
+
+
+
+##################################################################################
+# Simulation parameters
+set adv=1             # 1-Putman and Lin 2007 scheme; 2-LT2
+set dg=1              # duogrid (always 1)
+set gtype=0           # grid type(0-equiedge; 2-equiangular)
+set hord=8            # PPM scheme
+set N=48             # N
+set npz="32"
+
+set Tf="8"
+set dt_atmos="1920"    # atmos time step
+set n_split="8"       # 
+set div_damp=0.12     # divergence damping coefficient
+set dgflag=".true."
+set test_case="13"
+set testname="bi"
+set layout=1
+##################################################################################
+
+# set vorticity damping coefficient
+if ($hord == "5") then
+   set vort_damp=0.12
+else if ($hord == "6") then
+   if ($adv == "1") then
+      set vort_damp=0.12
+   else
+      set vort_damp=0.12
+   endif
+else
+   set vort_damp=0
+endif
+
+##################################################################################
+# rotation angles
+set alpha_deg=0
+set alpha = `awk 'BEGIN { printf "%.10f", '"$alpha_deg"' * 0.01745329251 }'`
+##################################################################################
 
 # case specific details
-@ Np1 = $N + 1
 set res=$N
-set MEMO="sw."$tcname # trying repro executable
-set TYPE="sw"         # choices:  nh, hydro
-set MODE="64bit"      # choices:  32bit, 64bit
+set MEMO="nh."$testname # trying repro executable
+set TYPE="nh"           # choices:  nh, hydro
+set MODE="64bit"        # choices:  32bit, 64bit
 set GRID="C$res"
 set HYPT="on"         # choices:  on, off  (controls hyperthreading)
-set COMP = "repro"       # choices:  debug, repro, prod
-set NO_SEND = "no_send"    # choices:  send, no_send
-set NUM_TOT = 1         # run cycle, 1: no restart # z2: increased
-set RELEASE = "solo_sw"         # run cycle, 1: no restart # z2: increased
+set COMP="repro"       # choices:  debug, repro, prod
+set RELEASE = "solo_nh"         # run cycle, 1: no restart # z2: increased
 set EXE  = "intel.x"
 
-# variables for hyperthreading
-# duogrid scheme
+
 if ( $dg == "1" ) then
   set dgname="dg1"
   set dgflag=".true."
@@ -66,61 +75,49 @@ else
   set dgname="kinked"
   set dgflag=".false."
 endif
-echo $dgname
 
-# variables for hyperthreading
-if ( "$tc" == "-2" ) then
-  set OUTDIR="${GRID}.${MEMO}.tc$tc.alpha$alpha.g$gtype.$mpname.$dgname"
-else if ( "$tc" == "-10" ) then
-  set OUTDIR="${GRID}.${MEMO}.tc$tc.alpha$alpha.g$gtype.$mpname.$dgname.hord$hord"
-else if ( "$tc" <= 1 ) then
-  set OUTDIR="${GRID}.${MEMO}.tc$tc.alpha$alpha.g$gtype.$dgname.adv$adv.hord$hord.mf$mf.tf$days" 
-else
-  set OUTDIR="${GRID}.${MEMO}.tc$tc.alpha$alpha.g$gtype.$dgname.adv$adv.hord$hord.dd$dd.vd$vd.mf$mf.tf$days"
-endif
-echo $OUTDIR
-
-if ($vd == "0") then
+if ($vort_damp == "0") then
   set do_vort_damp=.false.
 else
   set do_vort_damp=.true.
 endif
-echo $do_vort_damp
 
-# convert alpha to radians
-set alpha = `awk 'BEGIN { printf "%.10f", '"$alpha"' * 0.01745329251 }'`
+set OUTDIR="${GRID}.${MEMO}.g$gtype.$dgname.adv$adv.hord$hord"
+#set OUTDIR="${GRID}.${MEMO}.g$gtype.$dgname.adv$adv.hord$hord.vd$vort_damp"
 
 # directory structure
-set WORKDIR    = ${SCRATCHROOT}/${RELEASE}/${OUTDIR}
+set WORKDIR =  ${SCRATCHROOT}/${RELEASE}/${OUTDIR}
 #set executable = ${BUILD_AREA}/Build/bin/SOLO_${TYPE}.${COMP}.${MODE}.x
 set executable = ${BUILD_AREA}/Build/bin/SOLO_${TYPE}.${COMP}.${MODE}.${EXE}
 
-# input filesets
-echo $WORKDIR
 
 
-#changeable parameters
+# changeable parameters
 # dycore definitions
+@ Np1 = $res + 1
 set npx=$Np1
 set npy=$Np1
-set npz = "1" #Shallow water
-set layout_x = "6" 
-set layout_y = "6" 
-set io_layout = "1,1" #Want to increase this in a production run??
-set nthreads = "2"
+set layout_x="1"
+set layout_y="1"
+set io_layout="1,1"
+set nthreads="2"
 
 # run length
-set days = $days
-set hours = "0"
-set minutes = "0"
-set seconds = "0"
-set dt_atmos = $dt_atmos
+set days=$Tf
+set hours="0"
+set minutes="0"
+set seconds="0"
 
-set make_nh = ".F."
-set hydrostatic = ".T."
-set phys_hydrostatic = ".F."     # will be ignored in hydro mode
-set use_hydro_pressure = ".T."   # have to be .T. in hydro mode
-set consv_te = "0."
+# set variables in input.nml for initial run
+set na_init=0
+set curr_date="0,0,0,0"
+
+set make_nh=".F."
+set hydrostatic=".T."
+set phys_hydrostatic=".F."     # will be ignored in hydro mode
+set use_hydro_pressure=".T."   # have to be .T. in hydro mode
+set consv_te="0."
+
 
 # variables for hyperthreading
 if (${HYPT} == "on") then
@@ -201,13 +198,10 @@ echo ${RESTART_RUN}
 
 # copy over the executable
 cp $executable .
-pwd
-ls
-echo $executable
 
 
 #copy over the other tables and executable
-cp ${SCRIPT_AREA}/common/data_table data_table 
+cp ${SCRIPT_AREA}/tables/data_table data_table 
 cat >! field_table <<EOF
 
  "TRACER", "atmos_mod", "sphum" 
@@ -227,7 +221,7 @@ cat >! diag_table << EOF
 ${GRID}.${MODE}
 0 0 0 0 0 0 
 "grid_spec",    -1,  "hours",  1, "days", "time",
-"atmos_daily",  24,  "hours",  1, "days", "time",
+"atmos_daily",  1,  "hours",  1, "days", "time",
 
 "dynamics", "grid_lon", "grid_lon", "grid_spec", "all", .false.,  "none", 2,
 "dynamics", "grid_lat", "grid_lat", "grid_spec", "all", .false.,  "none", 2,
@@ -245,7 +239,13 @@ ${GRID}.${MODE}
 
 EOF
 
-cat >! input.nml <<EOF
+
+#
+# build the input.nml
+cat > input.nml <<EOF
+ &fms_affinity_nml
+    affinity = .false.
+/
 
  &fms_io_nml
        checksum_required   = .false.
@@ -260,41 +260,83 @@ cat >! input.nml <<EOF
 /
 
  &fv_core_nml
-  do_vort_damp=.false.
-  vtdm4=0.0
-  layout   = $layout_x,$layout_y
-  io_layout = $io_layout
-  npx      = $npx
-  npy      = $npy
-  ntiles   = 6
-  npz    = $npz
-  nwat = 0
-  grid_type = $gtype
-  na_init = 0
-  dnats = 0
-  nord = 2
-  d4_bg = $dd
-  vtdm4 = $vd
-  do_vort_damp = $do_vort_damp
-  mountain = .F.
-  hord_mt = $hord
-  hord_vt = $hord
-  hord_tm = $hord
-  hord_dp = $hord
-  hord_tr = $hord
-  n_split = $n_split
-  print_freq = $plotfreq
-  warm_start = .F.
-  duogrid    = $dgflag
-  duogrid_scheme = $dg
-  adv_scheme = $adv
-  mass_fixer = $mf
-  do_schmidt = .false.
-  adiabatic = .true.
+       d_ext=0.
+       do_vort_damp=.true.
+       d4_bg = $div_damp
+       vtdm4 = $vort_damp
+       do_vort_damp = $do_vort_damp
+
+       layout   = $layout_x,$layout_y
+       io_layout = $io_layout
+       npx      = $npx
+       npy      = $npy
+       ntiles   = 6
+       npz    = $npz
+       grid_type = $gtype
+       fv_debug = .F.
+       range_warn = .F.
+       reset_eta = .F.
+       n_sponge = -1
+       nudge_qv = .F.
+       RF_fast = .F.
+       tau_h2o = 0.
+       tau = -1.
+       rf_cutoff = -1.
+       d2_bg_k1 = 0.0
+       d2_bg_k2 = 0.0 ! z2: increased
+       kord_tm = -9
+       kord_mt = 9
+       kord_wz = 9
+       kord_tr = 9
+       hydrostatic = .F.
+       phys_hydrostatic = .F.
+       use_hydro_pressure = .F.
+       beta = 0.
+       a_imp = 1.
+       p_fac = 0.05
+       k_split = 1
+       n_split = 8
+       nwat = 0
+       na_init = 0
+       dnats = 0
+       dnats = 1
+       fv_sg_adj = -1
+       d2_bg = 0.
+       nord = 2
+       dddmp = 0.0
+       delt_max = 0.0
+       convert_ke = .false.
+       ke_bg = 0.
+       external_ic = .F. !COLD START
+       mountain = .F.
+       d_con = 0.0
+       hord_mt = $hord
+       hord_vt = $hord
+       hord_tm = $hord
+       hord_dp = $hord
+       hord_tr = $hord
+       adjust_dry_mass = .F.
+       consv_te = 0.0
+       do_sat_adj = .F.
+       do_inline_mp = .F.
+       consv_am = .F.
+       fill = .F.
+       dwind_2d = .F.
+       z_tracer = .T.
+       fill_dp = .F. 
+       print_freq = 12
+       warm_start = .F.
+       do_schmidt = .false.
+       target_lon = 0. !XI
+       adiabatic = .true.
+       duogrid    = $dgflag
+       duogrid_scheme = $dg
+       adv_scheme = $adv
 /
 
-&test_case_nml
-    test_case = $tc
+
+ &test_case_nml
+    test_case = $test_case
     alpha = $alpha
 /
 
@@ -311,8 +353,7 @@ cat >! input.nml <<EOF
 
 EOF
 
+
+
 # run the executable
 ${run_cmd} | tee fms.out || exit
-@ num ++
-echo "set num = ${num}" >! ${RST_COUNT}
-
