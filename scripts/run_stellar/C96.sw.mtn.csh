@@ -6,28 +6,56 @@
 #SBATCH --account=cimes2
 #SBATCH --time=1:00:00
 #SBATCH --cluster=stellar
-#SBATCH --ntasks=128
+#SBATCH --ntasks=1000
 
 set BUILD_AREA = "/home/ls9640/SHiELD_duo/SHiELD_build" 
 set SCRATCHROOT = "/scratch/cimes/ls9640"
 set SCRIPT_AREA = /home/ls9640/SHiELD_duo/SHiELD_build
-
 #set stellar environement
 source /home/ls9640/workspace_stellar/site/environment.stellar.sh_ok
 
+
 ##################################################################################
 # Simulation parameters
-set adv=1    # 1-Putman and Lin 2007 scheme; 2-LT2
-set dg=1     # duogrid (always 1)
-set dgflag=".true."
-set gtype=0  # grid type(0-equiedge; 2-equiangular)
-set hord=8   # PPM scheme
+set adv=2             # 1-Putman and Lin 2007 scheme; 2-LT2
+set dg=1              # duogrid (always 1)
+set gtype=0           # grid type(0-equiedge; 2-equiangular)
+set hord=5            # PPM scheme
+set N=96              # N
+set npz="1" #Shallow water
 
+set Tf="15"
+set dt_atmos="900"    # atmos time step
+set n_split="7"       # 
+set div_damp=0.12     # divergence damping coefficient
+set dgflag=".true."
+set test_case="5"
+set testname="mtn"
+set layout=4
+##################################################################################
+
+# set vorticity damping coefficient
+if ($hord == "5") then
+   set vort_damp=0.06
+else if ($hord == "6") then
+   if ($adv == "1") then
+      set vort_damp=0
+   else
+      set vort_damp=0.04
+   endif
+else
+   set vort_damp=0
+endif
+
+##################################################################################
+# rotation angles
+set alpha_deg=0
+set alpha = `awk 'BEGIN { printf "%.10f", '"$alpha_deg"' * 0.01745329251 }'`
 ##################################################################################
 
 # case specific details
-set res=192
-set MEMO="sw.modon" # trying repro executable
+set res=$N
+set MEMO="sw."$testname # trying repro executable
 set TYPE="sw"         # choices:  nh, hydro
 set MODE="64bit"      # choices:  32bit, 64bit
 set GRID="C$res"
@@ -36,8 +64,28 @@ set COMP="repro"       # choices:  debug, repro, prod
 set RELEASE = "solo_sw"         # run cycle, 1: no restart # z2: increased
 set EXE  = "intel.x"
 
+
+if ( $dg == "1" ) then
+  set dgname="dg1"
+  set dgflag=".true."
+else if ( $dg == "2" ) then
+  set dgname="dg2"
+  set dgflag=".true."
+else
+  set dgname="kinked"
+  set dgflag=".false."
+endif
+
+if ($vort_damp == "0") then
+  set do_vort_damp=.false.
+else
+  set do_vort_damp=.true.
+endif
+
+set OUTDIR="${GRID}.${MEMO}.g$gtype.$dgname.adv$adv.hord$hord"
+#set OUTDIR="${GRID}.${MEMO}.g$gtype.$dgname.adv$adv.hord$hord.vd$vort_damp"
+
 # directory structure
-set OUTDIR="${GRID}.${MEMO}.modons.g$gtype.adv$adv.hord$hord"
 set WORKDIR =  ${SCRATCHROOT}/${RELEASE}/${OUTDIR}
 #set executable = ${BUILD_AREA}/Build/bin/SOLO_${TYPE}.${COMP}.${MODE}.x
 set executable = ${BUILD_AREA}/Build/bin/SOLO_${TYPE}.${COMP}.${MODE}.${EXE}
@@ -49,18 +97,16 @@ set executable = ${BUILD_AREA}/Build/bin/SOLO_${TYPE}.${COMP}.${MODE}.${EXE}
 @ Np1 = $res + 1
 set npx=$Np1
 set npy=$Np1
-set npz="1" #Shallow water
-set layout_x="1"
-set layout_y="1"
+set layout_x=$layout
+set layout_y=$layout
 set io_layout="1,1"
 set nthreads="2"
 
 # run length
-set days="100"
+set days=$Tf
 set hours="0"
 set minutes="0"
 set seconds="0"
-set dt_atmos="1200"
 
 # set variables in input.nml for initial run
 set na_init=0
@@ -71,6 +117,7 @@ set hydrostatic=".T."
 set phys_hydrostatic=".F."     # will be ignored in hydro mode
 set use_hydro_pressure=".T."   # have to be .T. in hydro mode
 set consv_te="0."
+
 
 # variables for hyperthreading
 if (${HYPT} == "on") then
@@ -154,7 +201,7 @@ cp $executable .
 
 
 #copy over the other tables and executable
-cp ${SCRIPT_AREA}/tables/tables/data_table data_table 
+cp ${SCRIPT_AREA}/tables/data_table data_table 
 cat >! field_table <<EOF
 
  "TRACER", "atmos_mod", "sphum" 
@@ -206,7 +253,7 @@ cat > input.nml <<EOF
 
  &fms_nml
        clock_grain = 'ROUTINE',
-       domains_stack_size = 160000000,
+       domains_stack_size = 2000000000,
        print_memory_usage = .false.
 /
 
@@ -217,15 +264,17 @@ cat > input.nml <<EOF
        npy      = $npy
        ntiles   = 6
        npz    = $npz
-       grid_type = 0
+       grid_type = $gtype
        fv_debug = .F.
        beta = 0.
-       n_split = 16
+       n_split = $n_split
        nwat = 0
        na_init = $na_init
        dnats = 0
        nord = 2
-       d4_bg = 0.12
+       d4_bg = $div_damp
+       vtdm4 = $vort_damp
+       do_vort_damp = $do_vort_damp
        mountain = .F.
        hord_mt = $hord
        hord_vt = $hord
@@ -243,8 +292,8 @@ cat > input.nml <<EOF
 /
 
  &test_case_nml
-    test_case = 8
-    alpha = 0.
+    test_case = $test_case
+    alpha = $alpha
 /
 
  &main_nml
@@ -264,7 +313,3 @@ EOF
 
 # run the executable
 ${run_cmd} | tee fms.out || exit
-
-#
-# verification
-# < add logic for verification >

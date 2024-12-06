@@ -8,6 +8,8 @@ from matplotlib import ticker, cm, colors, colorbar
 
 #----------------------------------------------------------------------------------------------
 # directories
+#graphdir='/scratch/cimes/ls9640/graphs_solo_sw/'
+#datadir='/scratch/cimes/ls9640/solo_sw/'
 datadir='/gpfs/f5/scratch/Luan.Santos/gfdl_w/solo_sw/'
 graphdir = '/gpfs/f5/scratch/Luan.Santos/gfdl_w/graphs_solo_sw/'
 #----------------------------------------------------------------------------------------------
