@@ -29,7 +29,7 @@ set dt_atmos="1920"    # atmos time step
 set n_split="8"       # 
 set div_damp=0.12     # divergence damping coefficient
 set dgflag=".true."
-set test_case="13"
+set test_case="-13"
 set testname="bi"
 set layout=1
 ##################################################################################
@@ -227,7 +227,36 @@ ${GRID}.${MODE}
 "dynamics", "grid_lat", "grid_lat", "grid_spec", "all", .false.,  "none", 2,
 "dynamics", "area", "area", "grid_spec", "all", .false.,  "none", 2,
 
+####
+# 2D Variables
+####
 "dynamics", "ps_ic", "ps_ic",   "atmos_daily", "all", .false.,  "none", 2,
+####
+"dynamics",  "us",   "UGRDlowest", "atmos_daily", "all", .false.,  "none", 2
+"dynamics",  "u925", "UGRD925",    "atmos_daily", "all", .false.,  "none", 2
+"dynamics",  "u850", "UGRD850",    "atmos_daily", "all", .false.,  "none", 2
+"dynamics",  "u700", "UGRD700",    "atmos_daily", "all", .false.,  "none", 2
+"dynamics",  "u500", "UGRD500",    "atmos_daily", "all", .false.,  "none", 2
+"dynamics",  "u200", "UGRD200",    "atmos_daily", "all", .false.,  "none", 2
+####
+"dynamics",  "vs",   "VGRDlowest", "atmos_daily", "all", .false.,  "none", 2
+"dynamics",  "v925", "VGRD925",    "atmos_daily", "all", .false.,  "none", 2
+"dynamics",  "v850", "VGRD850",    "atmos_daily", "all", .false.,  "none", 2
+"dynamics",  "v700", "VGRD700",    "atmos_daily", "all", .false.,  "none", 2
+"dynamics",  "v500", "VGRD500",    "atmos_daily", "all", .false.,  "none", 2
+"dynamics",  "v200", "VGRD200",    "atmos_daily", "all", .false.,  "none", 2
+####
+"dynamics",  "w1000","w1000",      "atmos_daily", "all", .false.,  "none", 2
+"dynamics",  "w850", "w850",       "atmos_daily", "all", .false.,  "none", 2
+"dynamics",  "w700", "w700",       "atmos_daily", "all", .false.,  "none", 2
+"dynamics",  "w500", "w500",       "atmos_daily", "all", .false.,  "none", 2
+"dynamics",  "w200", "w200",       "atmos_daily", "all", .false.,  "none", 2
+"dynamics",  "w100", "w100",       "atmos_daily", "all", .false.,  "none", 2
+"dynamics",  "wmaxup",      "wmaxup",     "atmos_daily", "all", .false.,  "none", 2
+"dynamics",  "wmaxdn",      "wmaxdn",     "atmos_daily", "all", .false.,  "none", 2
+"dynamics",  "w5km",        "w5km",       "atmos_daily", "all", .false., "none", 2
+
+# 3D Variables
 "dynamics", "ps",    "ps",      "atmos_daily", "all", .false.,  "none", 2,
 "dynamics", "ua_ic", "ua_ic",   "atmos_daily", "all", .false.,  "none", 2,
 "dynamics", "va_ic", "va_ic",   "atmos_daily", "all", .false.,  "none", 2,
