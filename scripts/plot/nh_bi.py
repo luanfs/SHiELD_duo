@@ -187,6 +187,7 @@ for t in range(0,nplots+1,tgap):
 
     # time update
     time = time + tgap*dtplot 
+#exit()
 
 # plot
 time = 0  
@@ -240,14 +241,14 @@ for t in range(0,nplots+1,tgap):
     title = field+'_'+testname+'_t'+str(t)+'_'+basename+'.adv'+str(adv)+'.hord'+str(hord)
     filename = graphdir+title
     title = 'PL07\n'+title
-    plot_scalarfield(field_adv1, title, filename, filepaths[0], 'seismic', fmin, fmax)
+    #plot_scalarfield(field_adv1, title, filename, filepaths[0], 'seismic', fmin, fmax)
 
     adv=2
     field='u'
     title = field+'_'+testname+'_t'+str(t)+'_'+basename+'.adv'+str(adv)+'.hord'+str(hord)
     filename = graphdir+title
     title = 'LT2\n'+title
-    plot_scalarfield(field_adv2, title, filename, filepaths[0], 'seismic', fmin, fmax)
+    #plot_scalarfield(field_adv2, title, filename, filepaths[0], 'seismic', fmin, fmax)
 
     udiff = (field_adv1-field_adv2)#/(field_adv1+fref)
     dif_u[t] = np.amax(abs(udiff))/np.amax(abs(field_adv1+fref))
@@ -269,14 +270,14 @@ for t in range(0,nplots+1,tgap):
     title = field+'_'+testname+'_t'+str(t)+'_'+basename+'.adv'+str(adv)+'.hord'+str(hord)
     filename = graphdir+title
     title = 'PL07\n'+title
-    plot_scalarfield(field_adv1, title, filename, filepaths[0], 'seismic', fmin, fmax)
+    plot_scalarfield(field_adv1, title, filename, filepaths[0], 'viridis', fmin, fmax)
 
     adv=2
     field='v'
     title = field+'_'+testname+'_t'+str(t)+'_'+basename+'.adv'+str(adv)+'.hord'+str(hord)
     filename = graphdir+title
     title = 'LT2\n'+title
-    plot_scalarfield(field_adv2, title, filename, filepaths[0], 'seismic', fmin, fmax)
+    plot_scalarfield(field_adv2, title, filename, filepaths[0], 'viridis', fmin, fmax)
 
     #vdiff = (field_adv1-field_adv2)#/(field_adv1+fref)
     #dif_v[t] = np.amax(abs(vdiff))/np.amax(abs(field_adv1+fref))
