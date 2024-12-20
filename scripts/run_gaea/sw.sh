@@ -77,7 +77,7 @@ alphas=(45 45 45 45 45 45 45 45)
 N=48
 
 #number of grids to be tested (we double the values N for each new grid and divide dt by 2)
-Ng=5
+Ng=4
 
 #----------------------------------------------------------------------------------------------
 
@@ -86,7 +86,7 @@ case $tc in
     #-------------SW tests-------------
     2)
     tcname="geobalance"
-    days="15"
+    days="750"
     dt=3600
     n_split=7
     ;;
@@ -112,12 +112,20 @@ case $tc in
     n_split=8
     ;;
 
+    106)
+    tcname="splash"
+    days="750"
+    dt=3600
+    n_split=2
+    ;;
+
     110)
     tcname="divwind"
     days="7"
     dt=3200
     n_split=7
     ;;
+
 esac
 
 #----------------------------------------------------------------------------------------------

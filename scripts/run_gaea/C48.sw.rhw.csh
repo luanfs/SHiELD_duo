@@ -17,10 +17,10 @@ set SCRIPT_AREA = /ncrc/home2/Luan.Santos/SHiELD_duo/SHiELD_build
 
 ##################################################################################
 # Simulation parameters
-set adv=2             # 1-Putman and Lin 2007 scheme; 2-LT2
+set adv=1             # 1-Putman and Lin 2007 scheme; 2-LT2
 set dg=1              # duogrid (always 1)
 set gtype=0           # grid type(0-equiedge; 2-equiangular)
-set hord=5            # PPM scheme
+set hord=8            # PPM scheme
 set N=48              # N
 set npz="1" #Shallow water
 

@@ -6,7 +6,7 @@
 #SBATCH --account=gfdl_w
 #SBATCH --time=1:00:00
 #SBATCH --cluster=c5
-#SBATCH --nodes=10
+#SBATCH --ntasks=1000
 
 set BUILD_AREA = "/ncrc/home2/Luan.Santos/SHiELD_duo/SHiELD_build" 
 set SCRATCHROOT = "/gpfs/f5/gfdl_w/scratch/Luan.Santos"
@@ -17,48 +17,54 @@ set SCRIPT_AREA = /ncrc/home2/Luan.Santos/SHiELD_duo/SHiELD_build
 
 ##################################################################################
 # Simulation parameters
-set testcase="2"
-set adv=1             # 1-Putman and Lin 2007 scheme; 2-LT2
+set adv=2             # 1-Putman and Lin 2007 scheme; 2-LT2
 set dg=1              # duogrid (always 1)
 set gtype=0           # grid type(0-equiedge; 2-equiangular)
-set hord=8            # PPM scheme
+set hord=5            # PPM scheme
 set N=48              # N
+set N=96              # N
+set N=192             # N
+set npz="1" #Shallow water
 
-set dt_atmos="1800"   # atmos time step
-set n_split="7"       # 
+set Tf="20"
+set dt_atmos="3600"    # atmos time step
+set dt_atmos="1800"    # atmos time step
+set dt_atmos="900"     # atmos time step
+set n_split="2"       # 
 set div_damp=0.12     # divergence damping coefficient
 set dgflag=".true."
-set tf=1              # final time
-set layout=5
+set test_case="106"
+set testname="splash"
+set layout=4
 ##################################################################################
 
 # set vorticity damping coefficient
 if ($hord == "5") then
+   set vort_damp=0.06
+else if ($hord == "6") then
    if ($adv == "1") then
-      set vort_damp=0 #3
-   else
-      set vort_damp=0.04 #4
       set vort_damp=0
+   else
+      set vort_damp=0.04
    endif
 else
    set vort_damp=0
 endif
 
 ##################################################################################
-# rotation angles (always zero for this test)
-set alpha_deg=45
+# rotation angles
+set alpha_deg=0
 set alpha = `awk 'BEGIN { printf "%.10f", '"$alpha_deg"' * 0.01745329251 }'`
 ##################################################################################
 
 # case specific details
 set res=$N
-set MEMO="sw.geobalance" # trying repro executable
+set MEMO="sw."$testname # trying repro executable
 set TYPE="sw"         # choices:  nh, hydro
 set MODE="64bit"      # choices:  32bit, 64bit
 set GRID="C$res"
 set HYPT="on"         # choices:  on, off  (controls hyperthreading)
 set COMP="repro"       # choices:  debug, repro, prod
-#set COMP="debug"       # choices:  debug, repro, prod
 set RELEASE = "solo_sw"         # run cycle, 1: no restart # z2: increased
 set EXE  = "intel.x"
 
@@ -75,12 +81,13 @@ else
 endif
 
 if ($vort_damp == "0") then
-  set OUTDIR="${GRID}.${MEMO}.alpha$alpha_deg.g$gtype.$dgname.adv$adv.hord$hord.tf$tf"
   set do_vort_damp=.false.
 else
-  set OUTDIR="${GRID}.${MEMO}.alpha$alpha_deg.g$gtype.$dgname.adv$adv.hord$hord.vd$vort_damp.tf$tf"
   set do_vort_damp=.true.
 endif
+
+set OUTDIR="${GRID}.${MEMO}.g$gtype.$dgname.adv$adv.hord$hord"
+#set OUTDIR="${GRID}.${MEMO}.g$gtype.$dgname.adv$adv.hord$hord.vd$vort_damp"
 
 # directory structure
 set WORKDIR =  ${SCRATCHROOT}/${RELEASE}/${OUTDIR}
@@ -94,14 +101,13 @@ set executable = ${BUILD_AREA}/Build/bin/SOLO_${TYPE}.${COMP}.${MODE}.${EXE}
 @ Np1 = $res + 1
 set npx=$Np1
 set npy=$Np1
-set npz="1" #Shallow water
 set layout_x=$layout
 set layout_y=$layout
 set io_layout="1,1"
 set nthreads="2"
 
 # run length
-set days=$tf
+set days=$Tf
 set hours="0"
 set minutes="0"
 set seconds="0"
@@ -290,7 +296,7 @@ cat > input.nml <<EOF
 /
 
  &test_case_nml
-    test_case = $testcase
+    test_case = $test_case
     alpha = $alpha
 /
 

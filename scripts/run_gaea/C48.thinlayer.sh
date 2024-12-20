@@ -17,18 +17,26 @@ set SCRIPT_AREA = /ncrc/home2/Luan.Santos/SHiELD_duo/SHiELD_build
 
 ##################################################################################
 # Simulation parameters
-set testcase="2"
+set testcase="122"
 set adv=1             # 1-Putman and Lin 2007 scheme; 2-LT2
 set dg=1              # duogrid (always 1)
 set gtype=0           # grid type(0-equiedge; 2-equiangular)
 set hord=8            # PPM scheme
 set N=48              # N
+set N=96              # N
+set mean_depth=1.0
+set mean_depth=0.1
+set mean_depth=0.01
+set mean_depth=100
+set mean_depth=25
+set mean_depth=0.1
 
-set dt_atmos="1800"   # atmos time step
-set n_split="7"       # 
+set dt_atmos="250"   # atmos time step
+set dt_atmos="125"   # atmos time step
+set n_split="1"       # 
 set div_damp=0.12     # divergence damping coefficient
 set dgflag=".true."
-set tf=1              # final time
+set tf=100              # final time
 set layout=5
 ##################################################################################
 
@@ -46,13 +54,13 @@ endif
 
 ##################################################################################
 # rotation angles (always zero for this test)
-set alpha_deg=45
+set alpha_deg=0
 set alpha = `awk 'BEGIN { printf "%.10f", '"$alpha_deg"' * 0.01745329251 }'`
 ##################################################################################
 
 # case specific details
 set res=$N
-set MEMO="sw.geobalance" # trying repro executable
+set MEMO="sw.thinlayer" # trying repro executable
 set TYPE="sw"         # choices:  nh, hydro
 set MODE="64bit"      # choices:  32bit, 64bit
 set GRID="C$res"
@@ -287,6 +295,7 @@ cat > input.nml <<EOF
        duogrid    = $dgflag
        duogrid_scheme = $dg
        adv_scheme = $adv
+       mean_depth = $mean_depth
 /
 
  &test_case_nml

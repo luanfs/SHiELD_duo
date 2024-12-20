@@ -20,18 +20,18 @@ set SCRIPT_AREA = /ncrc/home2/Luan.Santos/SHiELD_duo/SHiELD_build
 set adv=1             # 1-Putman and Lin 2007 scheme; 2-LT2
 set dg=1              # duogrid (always 1)
 set gtype=0           # grid type(0-equiedge; 2-equiangular)
-set hord=8            # PPM scheme
+set hord=5            # PPM scheme
 set N=48             # N
 set npz="32"
 
-set Tf="8"
+set Tf="9"
 set dt_atmos="1920"    # atmos time step
 set n_split="8"       # 
 set div_damp=0.12     # divergence damping coefficient
 set dgflag=".true."
-set test_case="13"
+set test_case="-13"
 set testname="bi"
-set layout=1
+set layout=6
 ##################################################################################
 
 # set vorticity damping coefficient
@@ -221,7 +221,7 @@ cat >! diag_table << EOF
 ${GRID}.${MODE}
 0 0 0 0 0 0 
 "grid_spec",    -1,  "hours",  1, "days", "time",
-"atmos_daily",  1,  "hours",  1, "days", "time",
+"atmos_daily",  24,  "hours",  1, "days", "time",
 
 "dynamics", "grid_lon", "grid_lon", "grid_spec", "all", .false.,  "none", 2,
 "dynamics", "grid_lat", "grid_lat", "grid_spec", "all", .false.,  "none", 2,
@@ -236,6 +236,8 @@ ${GRID}.${MODE}
 "dynamics", "vort", "vort",   "atmos_daily", "all", .false.,  "none", 2,
 "dynamics", "pv", "pv",   "atmos_daily", "all", .false.,  "none", 2,
 "dynamics", "delp", "delp",   "atmos_daily", "all", .false.,  "none", 2,
+"dynamics", "u500", "UGRD500",   "atmos_daily", "all", .false.,  "none", 2,
+"dynamics", "v500", "VGRD500",   "atmos_daily", "all", .false.,  "none", 2,
 
 EOF
 
