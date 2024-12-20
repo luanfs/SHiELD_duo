@@ -987,9 +987,22 @@ endif
 
 #endif
         ! not used in sw
-        call fv_tp_2d(pt, crx_adv,cry_adv, npx, npy, hord_tm, gx, gy,  &
-                      xfx_adv,yfx_adv, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac, &
-                      mfx=fx, mfy=fy, mass=delp, nord=nord_v, damp_c=damp_v)
+        if(gridstruct%adv_scheme==1) then
+           call fv_tp_2d(pt, crx_adv,cry_adv, npx, npy, hord_tm, gx, gy,  &
+                         xfx_adv,yfx_adv, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac, &
+                         mfx=fx, mfy=fy, mass=delp, nord=nord_v, damp_c=damp_v)
+ 
+        else if(gridstruct%adv_scheme==2) then
+           do j=jsd,jed
+              do i=isd,ied
+                 pt(i,j) = delp(i,j)*pt(i,j)
+              enddo
+           enddo
+           call fv_tp_2d(pt, crx_dp2,cry_dp2, npx, npy, hord_tm, gx, gy,  &
+                         xfx_dp2,yfx_dp2, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac, &
+                         nord=nord_v, damp_c=damp_v, advscheme=flagstruct%adv_scheme)
+        endif
+
 
         do j=js,je
            do i=is,ie+1
@@ -1198,6 +1211,7 @@ endif
 #endif
 
      if ( inline_q ) then
+     if(flagstruct%adv_scheme==1) then
         do j=js,je
            do i=is,ie
                 wk(i,j) = delp(i,j)
@@ -1249,6 +1263,58 @@ endif
 #endif
         enddo
 
+     else if(flagstruct%adv_scheme==2) then
+        do j=js,je
+           do i=is,ie
+                wk(i,j) = delp(i,j)
+              delp(i,j) = wk(i,j) + (fx(i,j)-fx(i+1,j)+fy(i,j)-fy(i,j+1))*rarea(i,j)
+#ifdef SW_DYNAMICS
+              ptc(i,j) = pt(i,j)
+#else
+              pt(i,j) = (pt(i,j) +               &
+                        (gx(i,j)-gx(i+1,j)+gy(i,j)-gy(i,j+1))*rarea(i,j))/delp(i,j)
+#endif
+           enddo
+        enddo
+        do iq=1,nq
+
+        do j=js,je
+           do i=is,ie+1
+              gx(i,j)=allflux_x(i,j,k,4+iq)
+           enddo
+        enddo
+
+        do j=js,je+1
+           do i=is,ie
+              gy(i,j)=allflux_y(i,j,k,4+iq)
+           enddo
+        enddo
+
+#ifdef SW_DYNAMICS
+         if(test_case>1) then
+           do j=js,je
+              do i=is,ie
+                 q(i,j,k,iq) = (q(i,j,k,iq)*wk(i,j) +               &
+                         (gx(i,j)-gx(i+1,j)+gy(i,j)-gy(i,j+1))*rarea(i,j))/delp(i,j)
+              enddo
+           enddo
+         else
+           do j=js,je
+              do i=is,ie
+                 q(i,j,k,iq) = q(i,j,k,iq) + (gx(i,j)-gx(i+1,j)+gy(i,j)-gy(i,j+1))*rarea(i,j)
+              enddo
+           enddo
+         endif
+#else
+         do j=js,je
+            do i=is,ie
+               q(i,j,k,iq) = (q(i,j,k,iq)*wk(i,j) +               &
+                       (gx(i,j)-gx(i+1,j)+gy(i,j)-gy(i,j+1))*rarea(i,j))/delp(i,j)
+            enddo
+         enddo
+#endif
+        enddo
+     endif
 !     if ( zvir>0.01 ) then
 !       do j=js,je
 !          do i=is,ie
@@ -1258,6 +1324,7 @@ endif
 !     endif
 
      else
+      if(flagstruct%adv_scheme==1) then
         do j=js,je
            do i=is,ie
 #ifndef SW_DYNAMICS
@@ -1272,6 +1339,22 @@ endif
 #endif
            enddo
         enddo
+      else if(flagstruct%adv_scheme==2) then
+        do j=js,je
+           do i=is,ie
+#ifndef SW_DYNAMICS
+              pt(i,j) = pt(i,j) +               &
+                         (gx(i,j)-gx(i+1,j)+gy(i,j)-gy(i,j+1))*rarea(i,j)
+#endif
+              delp(i,j) = delp(i,j) +                     &
+                         (fx(i,j)-fx(i+1,j)+fy(i,j)-fy(i,j+1))*rarea(i,j)
+#ifndef SW_DYNAMICS
+              pt(i,j) = pt(i,j) / delp(i,j)
+
+#endif
+           enddo
+        enddo
+      endif
      endif
 
  end subroutine d_sw2
