@@ -183,7 +183,8 @@
       public :: pz0, zz0
       public :: read_namelist_test_case_nml, alpha, test_case
       public :: init_case
-      public :: case9_forcing1, case9_forcing2, case51_forcing, wind_NL2010, error_adv_zonal, error_density, error_divwind110
+      public :: case9_forcing1, case9_forcing2, case51_forcing
+      public :: wind_NL2010, error_adv_zonal, error_density, error_divwind110, error_divwind106, error_tc122
       public :: case110_forcing_cgrid, case110_forcing_dgrid
       public :: init_double_periodic
       public :: checker_tracers
@@ -543,6 +544,8 @@
          else
             call mp_update_dwinds(u, v, npx, npy, domain, bd)
          endif
+         gridstruct%u0(is:ie  ,js:je+1) = u(is:ie  ,js:je+1)
+         gridstruct%v0(is:ie+1,js:je  ) = v(is:ie+1,js:je  )
          call dtoa( u, v,ua,va,dx,dy,dxa,dya,dxc,dyc,npx,npy,ng, bd)
          call atoc(ua,va,uc,vc,dx,dy,dxa,dya,npx,npy,ng, bounded_domain, domain, bd, gridstruct, flagstruct)
      elseif (defOnGrid==7) then
@@ -1595,6 +1598,7 @@
 
          initWindsCase=initWindsCase7
       case(2)
+         call compute_conversion_matrices(bd, gridstruct)
          gh0  = 1.0e-6
          r0 = radius/3. !RADIUS radius/3.
          p1(2) = 35./180.*pi !0.
@@ -1624,7 +1628,25 @@
                                    sin(agrid(i  ,j  ,2))*cos(alpha) ) ** 2.0
             enddo
          enddo
+         gridstruct%delp0(is:ie,js:je) = delp(is:ie,js:je,1)
          initWindsCase=initWindsCase2
+
+      case(122)
+         Ubar = (2.0*pi*radius)/(12.0*86400.0)
+         gh0 = flagstruct%mean_depth*Grav
+         do j=js2,je2
+            do i=is2,ie2
+!         do j=jsd,jed
+!            do i=isd,ied
+               phis(i,j) = - (radius*omega*Ubar + (Ubar*Ubar)/2.) * &
+                             ( -1.*cos(agrid(i  ,j  ,1))*cos(agrid(i  ,j  ,2))*sin(alpha) + &
+                                   sin(agrid(i  ,j  ,2))*cos(alpha) ) ** 2.0
+               delp(i,j,1) = gh0
+            enddo
+         enddo
+         gridstruct%delp0(is:ie,js:je) = delp(is:ie,js:je,1)
+         initWindsCase=initWindsCase2
+ 
       case(3)
 !----------------------------
 ! Non-rotating potential flow
@@ -1820,6 +1842,52 @@
             enddo
          enddo
          initWindsCase=initWindsCase5
+
+      case(106)
+         call compute_conversion_matrices(bd, gridstruct)
+         phis = 0.0d0
+         p1(1) = 0.d0
+         p1(2) = PI/2.d0
+         phis=0.d0
+         call latlon2xyz(p1,e1)
+         do j=js2,je2
+            do i=is2,ie2
+               p2(1) = agrid(i,j,1)
+               p2(2) = agrid(i,j,2)
+               call latlon2xyz(p2,e2)
+               r = norm2(e2-e1)
+               delp(i,j,1) = (50.d0 + 1.d0*dexp(-10d0*r*r))*Grav
+            enddo
+         enddo
+
+         ! cosine bell
+         ! test parameters
+         Ubar = (2.0*pi*radius)/(12.0*86400.0)
+         gh0  = 1.0
+         phis = 0.0d0
+         r0 = radius/3.d0
+         p1(1) = 0.d0
+         p1(2) = 0.d0
+         p1(2) = pi*0.5d0
+         do j=jsd,jed
+            do i=isd,ied
+               p2(1) = agrid(i,j,1)
+               p2(2) = agrid(i,j,2)
+               r = great_circle_dist( p1, p2, radius )
+               if (r < r0) then
+                  delp(i,j,1) = 50.d0 + cos(0.5d0*PI*r/r0)
+               else
+                  delp(i,j,1) = 50.d0
+               endif
+               delp(i,j,1) = delp(i,j,1)*grav
+            enddo
+         enddo
+ 
+         u  = 0.;   v = 0.
+         f0 = 0.;  fC = 0.
+         initWindsCase= -1
+
+
 
       case(110)
          call compute_conversion_matrices(bd, gridstruct)
@@ -9415,17 +9483,24 @@ end subroutine case110_forcing
 
 
 
-subroutine error_adv_zonal(bd, delp, flagstruct, gridstruct, domain, time, init_step_atmos)
+subroutine error_adv_zonal(bd, delp, u, v, flagstruct, gridstruct, domain, time, init_step_atmos)
    !--------------------------------------------------
    ! Compute the error of the advection problem when the zonal wind is used
    !--------------------------------------------------
    type(fv_grid_bounds_type), intent(IN) :: bd
    real ,      intent(INOUT) ::   delp(bd%isd:bd%ied,bd%jsd:bd%jed  )
+   real ,      intent(INOUT) ::   u(bd%isd:bd%ied  ,bd%jsd:bd%jed+1 )
+   real ,      intent(INOUT) ::   v(bd%isd:bd%ied+1,bd%jsd:bd%jed  )
    type(fv_flags_type), target, intent(IN) :: flagstruct
    type(fv_grid_type), intent(INOUT), target :: gridstruct
    type(domain2d), intent(INOUT) :: domain
+
    real(kind=R_GRID) :: delp_exact(bd%isd:bd%ied  ,bd%jsd:bd%jed)
-   real(kind=R_GRID) :: error(bd%isd:bd%ied  ,bd%jsd:bd%jed)
+
+   real(kind=R_GRID) :: herror(bd%isd:bd%ied  ,bd%jsd:bd%jed)
+   real(kind=R_GRID) :: uerror(bd%isd:bd%ied  ,bd%jsd:bd%jed+1)
+   real(kind=R_GRID) :: verror(bd%isd:bd%ied+1,bd%jsd:bd%jed)
+
    real(kind=R_GRID), pointer, dimension(:,:,:)   :: agrid
    real, intent(in)  ::   time
    logical, intent(in) :: init_step_atmos
@@ -9437,11 +9512,14 @@ subroutine error_adv_zonal(bd, delp, flagstruct, gridstruct, domain, time, init_
    integer :: i, j
    integer :: is, ie, js, je
 
-   real(kind=R_GRID) :: linf_error, linf_norm
-   real(kind=R_GRID) :: l1_error, l1_norm
-   real(kind=R_GRID) :: l2_error, l2_norm
+   real(kind=R_GRID) :: hlinf_error, hlinf_norm
+   real(kind=R_GRID) :: ulinf_error, ulinf_norm
+   real(kind=R_GRID) :: vlinf_error, vlinf_norm
+   real(kind=R_GRID) :: hl1_error, hl1_norm
+   real(kind=R_GRID) :: hl2_error, hl2_norm
    integer :: master, nprocs
    character (len=128):: filename_error ! filename output
+   real(kind=R_GRID), pointer, dimension(:,:,:,:) :: a_covari2l
 
    is  = bd%is
    ie  = bd%ie
@@ -9450,13 +9528,6 @@ subroutine error_adv_zonal(bd, delp, flagstruct, gridstruct, domain, time, init_
 
    agrid => gridstruct%agrid_64
 
-   !if(mpp_pe()==0) print*, time, init_step_atmos
-   !if (init_step_atmos) then
-   !   call  calc_mass(gridstruct%m0, delp, bd, gridstruct)
-   !else
-   !   call  calc_mass(gridstruct%mf, delp, bd, gridstruct)
-   !endif
-   !if(mpp_pe()==0) print*, time, gridstruct%m0, gridstruct%mf, abs(gridstruct%mf-gridstruct%m0)/gridstruct%m0
    ! A grid
    do i = is, ie
       do j = js, je
@@ -9466,26 +9537,39 @@ subroutine error_adv_zonal(bd, delp, flagstruct, gridstruct, domain, time, init_
       enddo
    enddo
 
-   ! get error
-   error = delp_exact-delp
+   ! get error for h
+   herror = delp_exact-delp
+   uerror = gridstruct%u0-u
+   verror = gridstruct%v0-v
 
    ! get norms
-   call calc_linf_norm(linf_norm , delp_exact, bd, 0, 0)
-   call calc_linf_norm(linf_error, error     , bd, 0, 0)
-   linf_error = linf_error/linf_norm
+   ! depth
+   call calc_linf_norm(hlinf_norm , delp_exact, bd, 0, 0)
+   call calc_linf_norm(hlinf_error, herror     , bd, 0, 0)
+   hlinf_error = hlinf_error/hlinf_norm
 
-   call calc_l1_norm(l1_norm , delp_exact, bd, gridstruct, 0, 0)
-   call calc_l1_norm(l1_error, error     , bd, gridstruct, 0, 0)
-   l1_error = l1_error/l1_norm
+   call calc_l1_norm(hl1_norm , delp_exact, bd, gridstruct, 0, 0)
+   call calc_l1_norm(hl1_error, herror     , bd, gridstruct, 0, 0)
+   hl1_error = hl1_error/hl1_norm
 
-   call calc_l2_norm(l2_norm , delp_exact, bd, gridstruct, 0, 0)
-   call calc_l2_norm(l2_error, error     , bd, gridstruct, 0, 0)
-   l2_error = l2_error/l2_norm
+   call calc_l2_norm(hl2_norm , delp_exact, bd, gridstruct, 0, 0)
+   call calc_l2_norm(hl2_error, herror     , bd, gridstruct, 0, 0)
+   hl2_error = hl2_error/hl2_norm
 
- 
+   ! velocity
+   call calc_linf_norm(ulinf_norm , gridstruct%u0, bd, 0, 1)
+   call calc_linf_norm(ulinf_error, uerror, bd, 0, 1)
+   ulinf_error = ulinf_error/ulinf_norm
+
+   call calc_linf_norm(vlinf_norm , gridstruct%v0, bd, 1, 0)
+   call calc_linf_norm(vlinf_error, verror, bd, 1, 0)
+   vlinf_error = vlinf_error/vlinf_norm
+
    master = mpp_root_pe()
    if (mpp_pe()==master) then
-      print*, 'error', linf_error, l1_error, l2_error
+      !print*, 'error', hlinf_error, hl1_error, hl2_error
+      print*, 'error', hlinf_error, ulinf_error, vlinf_error
+      !print*, maxval(abs(a_covari2l(:,:,is:ie,js:je)))
       filename_error = "error_delp.txt"
       ! open the file
       if(init_step_atmos) then
@@ -9493,7 +9577,8 @@ subroutine error_adv_zonal(bd, delp, flagstruct, gridstruct, domain, time, init_
       else
          open(59, file=filename_error, status='old', position='append')
       endif
-      write(59,*) linf_error, l1_error, l2_error
+      !write(59,*) linf_error, l1_error, l2_error
+      write(59,*) hlinf_error, ulinf_error, vlinf_error
       close(59)
    endif
 end subroutine error_adv_zonal
@@ -9573,7 +9658,6 @@ subroutine error_density(npz, nq, bd, q, flagstruct, gridstruct, domain, time, i
       close(59)
    endif
 end subroutine error_density
-
 
 
 subroutine error_divwind110(bd, delp, flagstruct, gridstruct, domain, time, init_step_atmos)
@@ -9665,6 +9749,169 @@ end subroutine error_divwind110
 
 
 
+
+subroutine error_tc122(bd, delp, u, v, flagstruct, gridstruct, domain, time, init_step_atmos)
+   !--------------------------------------------------
+   ! Compute the error of the advection problem when the zonal wind is used
+   !--------------------------------------------------
+   type(fv_grid_bounds_type), intent(IN) :: bd
+   real ,      intent(INOUT) ::   delp(bd%isd:bd%ied,bd%jsd:bd%jed  )
+   real ,      intent(INOUT) ::   u(bd%isd:bd%ied  ,bd%jsd:bd%jed+1)
+   real ,      intent(INOUT) ::   v(bd%isd:bd%ied+1,bd%jsd:bd%jed  )
+   type(fv_flags_type), target, intent(IN) :: flagstruct
+   type(fv_grid_type), intent(INOUT), target :: gridstruct
+   type(domain2d), intent(INOUT) :: domain
+
+   real(kind=R_GRID) :: herror(bd%isd:bd%ied  ,bd%jsd:bd%jed)
+   real(kind=R_GRID) :: uerror(bd%isd:bd%ied  ,bd%jsd:bd%jed+1)
+   real(kind=R_GRID) :: verror(bd%isd:bd%ied+1,bd%jsd:bd%jed)
+
+   real(kind=R_GRID), pointer, dimension(:,:,:)   :: agrid
+   real(kind=R_GRID), pointer, dimension(:,:,:)   :: cgrid
+   real(kind=R_GRID), pointer, dimension(:,:,:)   :: dgrid
+   real, intent(in)  ::   time
+   logical, intent(in) :: init_step_atmos
+
+   ! aux vars
+   real(kind=R_GRID) :: lat, lon, gh0
+
+   ! bounds
+   integer :: i, j
+   integer :: is, ie, js, je
+
+   real(kind=R_GRID) :: hlinf_error, hlinf_norm
+   real(kind=R_GRID) :: ulinf_error, ulinf_norm
+   real(kind=R_GRID) :: vlinf_error, vlinf_norm
+   real(kind=R_GRID) :: hl1_error, hl1_norm
+   real(kind=R_GRID) :: hl2_error, hl2_norm
+ 
+   real(kind=R_GRID) :: delp_min, delp_max
+   integer :: master, nprocs
+   character (len=128):: filename_error ! filename output
+   real(kind=R_GRID), pointer, dimension(:,:,:,:) :: a_covari2l
+
+   is  = bd%is
+   ie  = bd%ie
+   js  = bd%js
+   je  = bd%je
+
+   agrid => gridstruct%agrid_64
+   cgrid => gridstruct%cgrid_64
+   dgrid => gridstruct%dgrid_64
+
+   ! get error
+   gh0 = flagstruct%mean_depth*Grav
+
+   ! get error for h
+   herror = gridstruct%delp0-delp
+   uerror = gridstruct%u0-u
+   verror = gridstruct%v0-v
+
+   ! get norms
+   ! depth
+   call calc_linf_norm(hlinf_norm , gridstruct%delp0, bd, 0, 0)
+   call calc_linf_norm(hlinf_error, herror     , bd, 0, 0)
+   hlinf_error = hlinf_error/hlinf_norm
+
+   call calc_l1_norm(hl1_norm , gridstruct%delp0, bd, gridstruct, 0, 0)
+   call calc_l1_norm(hl1_error, herror     , bd, gridstruct, 0, 0)
+   hl1_error = hl1_error/hl1_norm
+
+   call calc_l2_norm(hl2_norm , gridstruct%delp0, bd, gridstruct, 0, 0)
+   call calc_l2_norm(hl2_error, herror     , bd, gridstruct, 0, 0)
+   hl2_error = hl2_error/hl2_norm
+
+   ! velocity
+   call calc_linf_norm(ulinf_norm , gridstruct%u0, bd, 0, 1)
+   call calc_linf_norm(ulinf_error, uerror, bd, 0, 1)
+   ulinf_error = ulinf_error/ulinf_norm
+
+   call calc_linf_norm(vlinf_norm , gridstruct%v0, bd, 1, 0)
+   call calc_linf_norm(vlinf_error, verror, bd, 1, 0)
+   vlinf_error = vlinf_error/vlinf_norm
+
+   !call calc_min_max(delp_min, delp_max, delp, bd, 0, 0)
+   !call calc_min_max(delp_min, delp_max, va, bd, 0, 0)
+
+   master = mpp_root_pe()
+   if (mpp_pe()==master) then
+      filename_error = "error_delp.txt"
+      ! open the file
+      if(init_step_atmos) then
+         open(25, file=filename_error, status='replace')
+      else
+         open(25, file=filename_error, status='old', position='append')
+      endif
+      !write(25,*) linf_error, l1_error, l2_error
+      !write(25,*) time/86400.d0, (delp_min-gh0)/gh0, (delp_max-gh0)/gh0
+      write(25,*) time/86400.d0, hlinf_error, ulinf_error, vlinf_error
+      close(25)
+      print*, 'time', time/86400.d0, hlinf_error!, l1_error, l2_error
+      print*, hlinf_error, ulinf_error, vlinf_error
+      !print*, 'minmax', delp_min, delp_max
+      print*
+   endif
+end subroutine error_tc122
+
+
+
+subroutine error_divwind106(bd, ua, va, flagstruct, gridstruct, domain, time, init_step_atmos)
+   !--------------------------------------------------
+   type(fv_grid_bounds_type), intent(IN) :: bd
+   type(fv_flags_type), target, intent(IN) :: flagstruct
+   type(fv_grid_type), intent(INOUT), target :: gridstruct
+   type(domain2d), intent(INOUT) :: domain
+   real(kind=R_GRID) :: ua   (bd%isd:bd%ied ,bd%jsd:bd%jed)
+   real(kind=R_GRID) :: va   (bd%isd:bd%ied ,bd%jsd:bd%jed)
+   real(kind=R_GRID) :: ua_ll(bd%isd:bd%ied ,bd%jsd:bd%jed)
+   real, intent(in)  ::   time
+   logical, intent(in) :: init_step_atmos
+   real(kind=R_GRID), pointer, dimension(:,:,:,:) :: a_covari2l
+
+   ! bounds
+   integer :: i, j
+   integer :: is, ie, js, je
+
+   real(kind=R_GRID) :: linf_error
+   real(kind=R_GRID) :: l1_error
+   real(kind=R_GRID) :: l2_error
+   integer :: master, nprocs
+   character (len=128):: filename_error ! filename output
+
+   is  = bd%is
+   ie  = bd%ie
+   js  = bd%js
+   je  = bd%je
+
+   a_covari2l => gridstruct%a_covari2l
+   do i = is, ie
+     do j = js, je
+       ua_ll(i,j) = a_covari2l(1,1,i,j)*ua(i,j) + a_covari2l(1,2,i,j)*va(i,j)
+     enddo
+   enddo
+
+   ! get norms
+   call calc_linf_norm(linf_error, ua_ll, bd, 0, 0)
+   call calc_l1_norm(l1_error, ua_ll, bd, gridstruct, 0, 0)
+   call calc_l2_norm(l2_error, ua_ll, bd, gridstruct, 0, 0)
+
+   master = mpp_root_pe()
+   if (mpp_pe()==master) then
+      filename_error = "error_ua.txt"
+      ! open the file
+      if(init_step_atmos) then
+         open(25, file=filename_error, status='replace')
+      else
+         open(25, file=filename_error, status='old', position='append')
+      endif
+      write(25,*) linf_error, l1_error, l2_error
+      close(25)
+      print*, linf_error, l1_error, l2_error
+   endif
+end subroutine error_divwind106
+
+
+
 subroutine compute_ref_adv_zonal_wind(delp, lat, lon, time)
     !--------------------------------------------------
     !
@@ -9750,7 +9997,7 @@ subroutine compute_ref_adv_zonal_wind(delp, lat, lon, time)
          delp = 2.94e4 - (radius*omega*Ubar + (Ubar*Ubar)/2.) * &
                       ( -1.*dcos(lon)*dcos(lat)*sin(alpha) + &
                       dsin(lat)*dcos(alpha) ) ** 2.0
- 
+
       case default
          print*, 'Invalid test_case in compute_ref_adv_zonal_wind.'
          stop
@@ -9758,13 +10005,86 @@ subroutine compute_ref_adv_zonal_wind(delp, lat, lon, time)
 
 end subroutine compute_ref_adv_zonal_wind
 
+subroutine calc_min_max(minvalue, maxvalue, field, bd, istag, jstag)
+   !--------------------------------------------------
+   ! Compute the linf norm
+   !--------------------------------------------------
+   type(fv_grid_bounds_type), intent(IN) :: bd
+   integer, intent(IN) :: istag, jstag
+   real,  intent(INOUT) :: field(bd%isd:bd%ied+istag,bd%jsd:bd%jed+jstag)
+   real,  intent(INOUT) :: minvalue, maxvalue
+
+   ! bounds
+   integer :: i, j
+   integer :: is, ie, js, je
+
+   real(kind=R_GRID), allocatable :: min_values (:)
+   real(kind=R_GRID), allocatable :: max_values (:)
+   real(kind=R_GRID) :: min_value(1), max_value(1)
+   integer :: master, nprocs
+
+   is  = bd%is
+   ie  = bd%ie
+   js  = bd%js
+   je  = bd%je
+
+   min_value = minval(field(is:ie,js:je))
+   max_value = maxval(field(is:ie,js:je))
+
+   ! Get maximum among all processes
+   master = mpp_root_pe()
+   nprocs = mpp_npes()
+   if (mpp_pe()==master) then
+      allocate(min_values (0:nprocs-1))
+      allocate(max_values (0:nprocs-1))
+      min_values(master) = min_value(1)
+      max_values(master) = max_value(1)
+
+      do i = 0, nprocs-1
+         if(i .ne. master )then
+            call mpp_recv(min_value , size(min_value ) , from_pe=i)
+            call mpp_recv(max_value , size(max_value ) , from_pe=i)
+            min_values(i) = min_value(1)
+            max_values(i) = max_value(1)
+         endif
+      enddo
+
+      min_value(1) = minval(min_values)
+      max_value(1) = maxval(max_values)
+      deallocate(min_values)
+      deallocate(max_values)
+
+      ! send the norm to other processes
+      do i = 0, nprocs-1
+         if(i .ne. master )then
+            call mpp_send(min_value , size(min_value ) , to_pe=i)
+            call mpp_send(max_value , size(max_value ) , to_pe=i)
+         endif
+      enddo
+ 
+   else
+      ! send min, max
+      call mpp_send(min_value , size(min_value ) , to_pe=master)
+      call mpp_send(max_value , size(max_value ) , to_pe=master)
+
+      ! get min, max
+      call mpp_recv(min_value , size(min_value ) , from_pe=master)
+      call mpp_recv(max_value , size(max_value ) , from_pe=master)
+   endif
+
+   minvalue = min_value(1)
+   maxvalue = max_value(1)
+end subroutine calc_min_max
+
+
+
 subroutine calc_linf_norm(linfnorm, field, bd, istag, jstag)
    !--------------------------------------------------
    ! Compute the linf norm
    !--------------------------------------------------
    type(fv_grid_bounds_type), intent(IN) :: bd
    integer, intent(IN) :: istag, jstag
-   real,  intent(INOUT) :: field(bd%isd:bd%ied+jstag,bd%jsd:bd%jed+istag)
+   real,  intent(INOUT) :: field(bd%isd:bd%ied+istag,bd%jsd:bd%jed+jstag)
    real,  intent(INOUT) :: linfnorm
 
    ! bounds
@@ -9874,7 +10194,7 @@ subroutine calc_l1_norm(l1norm, field, bd, gridstruct, istag, jstag)
    type(fv_grid_bounds_type), intent(IN) :: bd
    integer, intent(IN) :: istag, jstag
    type(fv_grid_type), intent(INOUT), target :: gridstruct
-   real,  intent(INOUT) :: field(bd%isd:bd%ied+jstag,bd%jsd:bd%jed+istag)
+   real,  intent(INOUT) :: field(bd%isd:bd%ied+istag,bd%jsd:bd%jed+jstag)
    real,  intent(INOUT) :: l1norm
 
    ! bounds
@@ -9929,7 +10249,7 @@ subroutine calc_l2_norm(l2norm, field, bd, gridstruct, istag, jstag)
    type(fv_grid_bounds_type), intent(IN) :: bd
    integer, intent(IN) :: istag, jstag
    type(fv_grid_type), intent(INOUT), target :: gridstruct
-   real,  intent(INOUT) :: field(bd%isd:bd%ied+jstag,bd%jsd:bd%jed+istag)
+   real,  intent(INOUT) :: field(bd%isd:bd%ied+istag,bd%jsd:bd%jed+jstag)
    real,  intent(INOUT) :: l2norm
 
    ! bounds

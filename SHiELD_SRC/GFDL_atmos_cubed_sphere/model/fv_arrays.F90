@@ -339,6 +339,11 @@ end type duogrid_type
      real(kind=R_GRID), allocatable, dimension(:,:) ::  rnorm_tgx_d
      real(kind=R_GRID), allocatable, dimension(:,:) ::  rnorm_tgy_d
 
+     real(kind=R_GRID), allocatable, dimension(:,:) ::  delp0
+     real(kind=R_GRID), allocatable, dimension(:,:) ::  u0
+     real(kind=R_GRID), allocatable, dimension(:,:) ::  v0
+
+
      ! local coordinates
      real(kind=R_GRID), allocatable, dimension(:) :: line_a(:), line_b(:) 
 
@@ -391,6 +396,9 @@ end type duogrid_type
 
      real(kind=R_GRID), allocatable, dimension(:,:,:,:) :: c_contra2l
      real(kind=R_GRID), allocatable, dimension(:,:,:,:) :: d_contra2l
+
+     real(kind=R_GRID), allocatable, dimension(:,:,:,:) :: a_l2covari
+     real(kind=R_GRID), allocatable, dimension(:,:,:,:) :: a_covari2l
 
 !    real, allocatable :: w00(:,:)
 
@@ -751,6 +759,7 @@ end type duogrid_type
    integer :: duogrid_scheme
    integer :: adv_scheme = 1 ! advection scheme
    integer :: mass_fixer = 1 ! mass fixer (0-none; 1-flux average)
+   real(kind=R_GRID) :: mean_depth = 1.d0 ! mean depth
    logical :: midpoint_cube = .false. ! reformulate midpoints using cube sphere mappings
 !-----------------------------------------------------------
 ! Grid shifting, rotation, and cube transformations:
@@ -2093,6 +2102,10 @@ contains
     allocate ( Atm%gridstruct%rnorm_tgx_d(isd_2d:ied_2d  ,  jsd_2d:jed_2d+1) )
     allocate ( Atm%gridstruct%rnorm_tgy_d(isd_2d:ied_2d  ,  jsd_2d:jed_2d+1) )
 
+    allocate ( Atm%gridstruct%delp0(isd_2d:ied_2d  ,  jsd_2d:jed_2d) )
+    allocate ( Atm%gridstruct%u0(isd_2d:ied_2d  ,  jsd_2d:jed_2d+1) )
+    allocate ( Atm%gridstruct%v0(isd_2d:ied_2d+1,  jsd_2d:jed_2d  ) )
+
     allocate ( Atm%gridstruct%  e1(3,isd_2d:ied_2d+1,jsd_2d:jed_2d+1) )
     allocate ( Atm%gridstruct%  e2(3,isd_2d:ied_2d+1,jsd_2d:jed_2d+1) )
 
@@ -2181,7 +2194,11 @@ contains
 
     allocate ( Atm%gridstruct%c_contra2l(1:2, 1:2, isd_2d:ied_2d+1,jsd_2d:jed_2d  ) )
     allocate ( Atm%gridstruct%d_contra2l(1:2, 1:2, isd_2d:ied_2d  ,jsd_2d:jed_2d+1) )
- 
+
+    allocate ( Atm%gridstruct%a_l2covari(1:2, 1:2, isd_2d:ied_2d  ,jsd_2d:jed_2d) )
+    allocate ( Atm%gridstruct%a_covari2l(1:2, 1:2, isd_2d:ied_2d  ,jsd_2d:jed_2d) )
+
+
     ! Super (composite) grid:
 
     !     9---4---8
@@ -2427,6 +2444,10 @@ contains
     deallocate ( Atm%gridstruct%rnorm_tgx_c)
     deallocate ( Atm%gridstruct%rnorm_tgy_d)
 
+    deallocate ( Atm%gridstruct%delp0)
+    deallocate ( Atm%gridstruct%u0)
+    deallocate ( Atm%gridstruct%v0)
+
     deallocate (Atm%gridstruct%iinta, &
          Atm%gridstruct%jinta,  &
          Atm%gridstruct%iintb, &
@@ -2507,6 +2528,9 @@ contains
 
     deallocate (  Atm%gridstruct%c_contra2l )
     deallocate (  Atm%gridstruct%d_contra2l )
+
+    deallocate (  Atm%gridstruct%a_l2covari )
+    deallocate (  Atm%gridstruct%a_covari2l )
 
     ! Super (composite) grid:
 

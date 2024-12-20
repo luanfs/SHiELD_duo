@@ -189,6 +189,7 @@ module fv_control_mod
      integer , pointer :: adv_scheme
      integer , pointer :: mass_fixer
      logical , pointer :: midpoint_cube
+     real(kind=R_GRID) , pointer :: mean_depth
 
      real , pointer :: shift_fac
      logical , pointer :: do_schmidt, do_cube_transform
@@ -749,6 +750,7 @@ module fv_control_mod
        duogrid_scheme                => Atm%flagstruct%duogrid_scheme
        adv_scheme                    => Atm%flagstruct%adv_scheme
        mass_fixer                    => Atm%flagstruct%mass_fixer
+       mean_depth                    => Atm%flagstruct%mean_depth
        midpoint_cube                 => Atm%flagstruct%midpoint_cube
        shift_fac                     => Atm%flagstruct%shift_fac
        do_schmidt                    => Atm%flagstruct%do_schmidt
@@ -956,7 +958,7 @@ module fv_control_mod
             use_logp, p_fac, a_imp, k_split, n_split, m_split, q_split, print_freq, write_3d_diags, &
             do_schmidt, do_cube_transform, &
             hord_mt, hord_vt, hord_tm, hord_dp, hord_tr, shift_fac, stretch_fac, target_lat, target_lon, duogrid, &
-            duogrid_scheme, adv_scheme, mass_fixer, midpoint_cube, &
+            duogrid_scheme, adv_scheme, mass_fixer, midpoint_cube, mean_depth, &
             kord_mt, kord_wz, kord_tm, kord_tr, remap_te, fv_debug, fv_land, consv_checker, &
             do_am4_remap, nudge, do_sat_adj, do_fast_phys, do_inline_mp, do_aerosol, do_f3d, &
             external_ic, read_increment, ncep_ic, nggps_ic, hrrrv3_ic, ecmwf_ic, use_new_ncep, use_ncep_phy, fv_diag_ic, &

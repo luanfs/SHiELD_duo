@@ -2589,6 +2589,7 @@ endif
       real(kind=R_GRID) :: a11, a12, a21, a22, det
       real, pointer, dimension(:,:,:,:) :: d_contra2l, d_l2contra, d_l2covari
       real, pointer, dimension(:,:,:,:) :: c_contra2l, c_l2contra, c_l2covari
+      real, pointer, dimension(:,:,:,:) :: a_covari2l, a_l2covari
       real, pointer, dimension(:,:,:) :: agrid, grid, cgrid, dgrid
 
       c_contra2l => gridstruct%c_contra2l
@@ -2599,6 +2600,10 @@ endif
 
       c_l2covari => gridstruct%c_l2covari
       d_l2covari => gridstruct%d_l2covari
+
+
+      a_covari2l => gridstruct%a_covari2l
+      a_l2covari => gridstruct%a_l2covari
 
        grid => gridstruct% grid_64
       agrid => gridstruct%agrid_64
@@ -2613,6 +2618,46 @@ endif
       ied = bd%ied
       jsd = bd%jsd
       jed = bd%jed
+
+      ! D grid
+      do i = is, ie
+         do j = js, je
+            ! get latlon tangent vector
+            call unit_vect_latlon_ext(agrid(i,j,1:2), elon, elat)
+            call latlon2xyz(agrid(i,j,1:2), p0)
+            call latlon2xyz(cgrid(i,j,1:2), px)
+            call latlon2xyz(dgrid(i,j+1,1:2), py)
+
+            ! unit vector - x direction
+            ex = px-p0
+            ex = proj_vec_sphere(ex, p0)
+            ex = ex/norm2(ex)
+
+            ! unit vector - y direction
+            ey = py-p0
+            ey = proj_vec_sphere(ey, p0)
+            ey = ey/norm2(ey)
+
+            a11 = dot_product(ex, elon)  
+            a12 = dot_product(ey, elon)  
+            a21 = dot_product(ex, elat)  
+            a22 = dot_product(ey, elat) 
+            det = a11*a22 - a21*a12
+
+            ! latlon to covari matrix 
+            a_l2covari(1,1,i,j) = a11
+            a_l2covari(1,2,i,j) = a21 
+            a_l2covari(2,1,i,j) = a12
+            a_l2covari(2,2,i,j) = a22
+
+            ! covari to latlon matrix 
+            a_covari2l(1,1,i,j) =  a22/det
+            a_covari2l(1,2,i,j) = -a21/det
+            a_covari2l(2,1,i,j) = -a12/det
+            a_covari2l(2,2,i,j) =  a11/det
+         enddo
+      enddo
+
 
       ! C grid
       do i = isd, ied+1
