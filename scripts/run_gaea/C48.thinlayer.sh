@@ -18,23 +18,25 @@ set SCRIPT_AREA = /ncrc/home2/Luan.Santos/SHiELD_duo/SHiELD_build
 ##################################################################################
 # Simulation parameters
 set testcase="122"
-set adv=1             # 1-Putman and Lin 2007 scheme; 2-LT2
+set adv=2             # 1-Putman and Lin 2007 scheme; 2-LT2
 set dg=1              # duogrid (always 1)
 set gtype=0           # grid type(0-equiedge; 2-equiangular)
 set hord=8            # PPM scheme
 set N=48              # N
-set N=96              # N
-set mean_depth=1.0
-set mean_depth=0.1
-set mean_depth=0.01
-set mean_depth=100
+#set N=96              # N
+
 set mean_depth=25
+set mean_depth=10
+set mean_depth=5
+set mean_depth=1
+set mean_depth=0.5
 set mean_depth=0.1
+set mean_depth=0.05
+set mean_depth=0.01
 
 set dt_atmos="250"   # atmos time step
-set dt_atmos="125"   # atmos time step
+#set dt_atmos="125"   # atmos time step
 set n_split="1"       # 
-set div_damp=0.12     # divergence damping coefficient
 set dgflag=".true."
 set tf=100              # final time
 set layout=5
@@ -43,13 +45,21 @@ set layout=5
 # set vorticity damping coefficient
 if ($hord == "5") then
    if ($adv == "1") then
-      set vort_damp=0 #3
+      set vort_damp=0.06
+      set div_damp=0.15
    else
-      set vort_damp=0.04 #4
-      set vort_damp=0
+      set vort_damp=0.06
+      set div_damp=0.15
    endif
-else
-   set vort_damp=0
+else if ($hord == "8") then
+   if ($adv == "1") then
+      set vort_damp=0.06
+      #set vort_damp=0
+      set div_damp=0.13
+   else
+      set vort_damp=0
+      set div_damp=0.13
+   endif
 endif
 
 ##################################################################################
@@ -83,12 +93,17 @@ else
 endif
 
 if ($vort_damp == "0") then
-  set OUTDIR="${GRID}.${MEMO}.alpha$alpha_deg.g$gtype.$dgname.adv$adv.hord$hord.tf$tf"
+  set OUTDIR="${GRID}.${MEMO}.alpha$alpha_deg.g$gtype.$dgname.adv$adv.hord$hord.tf$tf.meandepth$mean_depth"
+  #set OUTDIR="${GRID}.${MEMO}.alpha$alpha_deg.g$gtype.$dgname.adv$adv.hord$hord.vd$vort_damp.tf$tf.meandepth$mean_depth"
   set do_vort_damp=.false.
 else
-  set OUTDIR="${GRID}.${MEMO}.alpha$alpha_deg.g$gtype.$dgname.adv$adv.hord$hord.vd$vort_damp.tf$tf"
+  #set OUTDIR="${GRID}.${MEMO}.alpha$alpha_deg.g$gtype.$dgname.adv$adv.hord$hord.vd$vort_damp.tf$tf.meandepth$mean_depth"
+  set OUTDIR="${GRID}.${MEMO}.alpha$alpha_deg.g$gtype.$dgname.adv$adv.hord$hord.tf$tf.meandepth$mean_depth"
+  #set OUTDIR="${GRID}.${MEMO}.alpha$alpha_deg.g$gtype.$dgname.adv$adv.hord$hord.vd$vort_damp.tf$tf.meandepth$mean_depth"
   set do_vort_damp=.true.
 endif
+
+set OUTDIR="${GRID}.${MEMO}.alpha$alpha_deg.g$gtype.$dgname.adv$adv.hord$hord.dd$div_damp.vd$vort_damp.tf$tf.meandepth$mean_depth"
 
 # directory structure
 set WORKDIR =  ${SCRATCHROOT}/${RELEASE}/${OUTDIR}
