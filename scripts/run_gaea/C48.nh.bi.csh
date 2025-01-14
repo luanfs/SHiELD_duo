@@ -17,35 +17,61 @@ set SCRIPT_AREA = /ncrc/home2/Luan.Santos/SHiELD_duo/SHiELD_build
 
 ##################################################################################
 # Simulation parameters
-set adv=1             # 1-Putman and Lin 2007 scheme; 2-LT2
+set adv=2             # 1-Putman and Lin 2007 scheme; 2-LT2
 set dg=1              # duogrid (always 1)
 set gtype=0           # grid type(0-equiedge; 2-equiangular)
 set hord=5            # PPM scheme
-set N=48             # N
+set N=48              # N
+set N=96              # N
+set N=192             # N
+#set N=384             # N
 set npz="32"
 
-set Tf="9"
+#set TYPE="nh"           # choices:  nh, hydro
+set TYPE="hydro"           # choices:  nh, hydro
+
+set Tf="15"
 set dt_atmos="1920"    # atmos time step
+set dt_atmos="960"    # atmos time step
+set dt_atmos="480"     # atmos time step
+#set dt_atmos="240"     # atmos time step
 set n_split="8"       # 
-set div_damp=0.12     # divergence damping coefficient
 set dgflag=".true."
 set test_case="-13"
 set testname="bi"
-set layout=6
+set layout=5
 ##################################################################################
 
-# set vorticity damping coefficient
+# set divergence/vorticity damping coefficient
 if ($hord == "5") then
-   set vort_damp=0.12
-else if ($hord == "6") then
    if ($adv == "1") then
+      set div_damp=0.12
       set vort_damp=0.12
    else
+      set div_damp=0.14
+      set vort_damp=0.13
+   endif
+else if ($hord == "6") then
+   if ($adv == "1") then
+      set div_damp=0.12
+      set vort_damp=0.06
+   else
+      set div_damp=0.12
       set vort_damp=0.12
+   endif
+else if ($hord == "8") then
+   if ($adv == "1") then
+      set div_damp=0.12
+      set vort_damp=0
+   else
+      set div_damp=0.12
+      set vort_damp=0.06
+      set vort_damp=0
    endif
 else
    set vort_damp=0
 endif
+
 
 ##################################################################################
 # rotation angles
@@ -55,13 +81,12 @@ set alpha = `awk 'BEGIN { printf "%.10f", '"$alpha_deg"' * 0.01745329251 }'`
 
 # case specific details
 set res=$N
-set MEMO="nh."$testname # trying repro executable
-set TYPE="nh"           # choices:  nh, hydro
+set MEMO=$TYPE"."$testname # trying repro executable
 set MODE="64bit"        # choices:  32bit, 64bit
 set GRID="C$res"
 set HYPT="on"         # choices:  on, off  (controls hyperthreading)
 set COMP="repro"       # choices:  debug, repro, prod
-set RELEASE = "solo_nh"         # run cycle, 1: no restart # z2: increased
+set RELEASE = "solo_"$TYPE         # run cycle, 1: no restart # z2: increased
 set EXE  = "intel.x"
 
 
@@ -97,8 +122,8 @@ set executable = ${BUILD_AREA}/Build/bin/SOLO_${TYPE}.${COMP}.${MODE}.${EXE}
 @ Np1 = $res + 1
 set npx=$Np1
 set npy=$Np1
-set layout_x="1"
-set layout_y="1"
+set layout_x=$layout
+set layout_y=$layout
 set io_layout="1,1"
 set nthreads="2"
 
@@ -112,11 +137,22 @@ set seconds="0"
 set na_init=0
 set curr_date="0,0,0,0"
 
-set make_nh=".F."
-set hydrostatic=".T."
-set phys_hydrostatic=".F."     # will be ignored in hydro mode
-set use_hydro_pressure=".T."   # have to be .T. in hydro mode
-set consv_te="0."
+
+if (${TYPE} == "nh")then
+   # non-hydrostatic options
+   set make_nh=".T."
+   set hydrostatic=".F."
+   set phys_hydrostatic=".F."     # can be tested
+   set use_hydro_pressure=".F."   # can be tested
+   set consv_te="1."
+else
+   # hydrostatic options
+   set make_nh=".F."
+   set hydrostatic=".T."
+   set phys_hydrostatic=".F."     # will be ignored in hydro mode
+   set use_hydro_pressure=".T."   # have to be .T. in hydro mode
+   set consv_te="0."
+endif
 
 
 # variables for hyperthreading
@@ -290,14 +326,14 @@ cat > input.nml <<EOF
        kord_mt = 9
        kord_wz = 9
        kord_tr = 9
-       hydrostatic = .F.
-       phys_hydrostatic = .F.
-       use_hydro_pressure = .F.
+       hydrostatic = $hydrostatic
+       phys_hydrostatic = $phys_hydrostatic
+       use_hydro_pressure = $use_hydro_pressure
        beta = 0.
        a_imp = 1.
        p_fac = 0.05
        k_split = 1
-       n_split = 8
+       n_split = $n_split
        nwat = 0
        na_init = 0
        dnats = 0

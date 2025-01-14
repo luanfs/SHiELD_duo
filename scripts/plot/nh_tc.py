@@ -9,7 +9,7 @@ from matplotlib import ticker, cm, colors, colorbar
 #----------------------------------------------------------------------------------------------
 # directories
 hydro="nh"
-hydro="hydro"
+#hydro="hydro"
 #datadir='/scratch/cimes/ls9640/solo_'+hydro+'/'
 #graphdir = '/scratch/cimes/ls9640/graphs_solo_'+hydro+'/'
 
@@ -21,22 +21,15 @@ graphdir = '/gpfs/f5/scratch/Luan.Santos/gfdl_w/graphs_solo_'+hydro+'/'
 
 #----------------------------------------------------------------------------------------------
 #simulation parameters
-N=48
-N=96
-N=192
-Tf=8
+N=128
+Tf=1
 gtype = 0
-hords = (8,)
 hords = (5,)
 advs  = (1,2)
-dds = (0.12,0.12)
-vds = (0.06,0.06)
-
-testname='bi'
+testname='tc'
 dg='dg1'
 basename= "C"+str(N)+"."+hydro+"."+testname+".g"+str(gtype)+"."+str(dg)
 #----------------------------------------------------------------------------------------------
-
 
 
 #----------------------------------------------------------------------------------------------
@@ -83,7 +76,7 @@ def plot_scalarfield(q, title, filename, filepath, colormap, qmin, qmax):
         grid = xr.open_dataset(grid_file , decode_times=False)
 
         # Get grid
-        lon = grid['grid_lon']
+        lon = grid['grid_lon']+180
         lat = grid['grid_lat']
 
         # Plot cube edges
@@ -103,6 +96,7 @@ def plot_scalarfield(q, title, filename, filepath, colormap, qmin, qmax):
         im = ax.pcolormesh(lon, lat, q[:,:,tile], alpha=1, transform=ccrs.PlateCarree(), \
         zorder=10, vmin = qmin, vmax=qmax,  cmap=colormap)
 
+    #plt.xlim(0,360)
     plt.title(title,  fontsize=19)
     #print(qmin,qmax)
     # Plot colorbar
@@ -131,19 +125,18 @@ elif gtype==2:
 filepaths = []
 for hord in hords: 
     datas = []
-    for adv, dd, vd in zip(advs, dds, vds):
-        filepath = datadir+basename+'.adv'+str(adv)+'.hord'+str(hord)+'.dd'+str(dd)+'.vd'+str(vd)+"/rundir/"
-        print(filepath)
+    for adv in advs:
+        filepath = datadir+basename+'.adv'+str(adv)+'.hord'+str(hord)+"/rundir/"
         filepaths.append(filepath)
-exit()
 
 # Get the number of plots
-atmos_file = filepaths[0]+"atmos_daily.tile1.nc"
+atmos_file = filepaths[0]+"atmos_4xdaily.tile1.nc"
 data = xr.open_dataset(atmos_file, decode_times=False)
 times = data.time.values
 nplots = len(times)
 dtplot = times[1]-times[0]
-npz = np.shape(data['pfull'][:])[0]
+#npz = np.shape(data['pfull'][:])[0]
+npz = 1
 
 #-----------------------------------------------------------------------------------------
 # Arrays to store the data that will be plotted
@@ -160,13 +153,14 @@ pv = np.zeros((N,N,6,nplots+1,len(advs)))
 time = 0  
 tgap=1
 #nplots = 100
+#exit()
 for t in range(0,nplots+1,tgap):
     print(t)
     for k, filepath in enumerate(filepaths):
         for tile in range(0,6):
             print(time, k, filepath, tile)
             # Files to be opened
-            atmos_file = filepath+"atmos_daily.tile"+str(tile+1)+".nc"
+            atmos_file = filepath+"atmos_4xdaily.tile"+str(tile+1)+".nc"
             grid_file  = filepath+"grid_spec.tile"+str(tile+1)+".nc"
 
             # Load the files
@@ -185,8 +179,10 @@ for t in range(0,nplots+1,tgap):
             #   v[:,:,tile,t,k] = data['vcomp'][t-1,:,:].values
             #   vort[:,:,tile,t,k] = data['vort'][t-1,:,:].values
             #   pv[:,:,tile,t,k] = data['pv'][t-1,:,:].values
-                u[:,:,tile,t,k] = data['UGRD500'][t-1,:,:].values
-                v[:,:,tile,t,k] = data['VGRD500'][t-1,:,:].values
+                u[:,:,tile,t,k] = data['u850'][t-1,:,:].values
+                v[:,:,tile,t,k] = data['v850'][t-1,:,:].values
+                vort[:,:,tile,t,k] = data['vort850'][t-1,:,:].values
+            #   pv[:,:,tile,t,k] = data['pv'][t-1,:,:].values
             else: #get ic
                 print('hi')
 
@@ -251,14 +247,14 @@ for t in range(0,nplots+1,tgap):
     title = field+'_'+testname+'_t'+str(t)+'_'+basename+'.adv'+str(adv)+'.hord'+str(hord)
     filename = graphdir+title
     title = 'PL07\n'+title
-    #plot_scalarfield(field_adv1, title, filename, filepaths[0], 'seismic', fmin, fmax)
+    plot_scalarfield(field_adv1, title, filename, filepaths[0], 'seismic', fmin, fmax)
 
     adv=2
     field='u'
     title = field+'_'+testname+'_t'+str(t)+'_'+basename+'.adv'+str(adv)+'.hord'+str(hord)
     filename = graphdir+title
     title = 'LT2\n'+title
-    #plot_scalarfield(field_adv2, title, filename, filepaths[0], 'seismic', fmin, fmax)
+    plot_scalarfield(field_adv2, title, filename, filepaths[0], 'seismic', fmin, fmax)
 
     udiff = (field_adv1-field_adv2)#/(field_adv1+fref)
     dif_u[t] = np.amax(abs(udiff))/np.amax(abs(field_adv1+fref))
@@ -313,14 +309,14 @@ for t in range(0,nplots+1,tgap):
     title = field+'_'+testname+'_t'+str(t)+'_'+basename+'.adv'+str(adv)+'.hord'+str(hord)
     filename = graphdir+title
     title = 'PL07\n'+title
-    #plot_scalarfield(field_adv1, title, filename, filepaths[0], 'seismic', fmin, fmax)
+    plot_scalarfield(field_adv1, title, filename, filepaths[0], 'seismic', fmin, fmax)
 
     adv=2
     field='vort'
     title = field+'_'+testname+'_t'+str(t)+'_'+basename+'.adv'+str(adv)+'.hord'+str(hord)
     filename = graphdir+title
     title = 'LT2\n'+title
-    #plot_scalarfield(field_adv2, title, filename, filepaths[0], 'seismic', fmin, fmax)
+    plot_scalarfield(field_adv2, title, filename, filepaths[0], 'seismic', fmin, fmax)
     ##############################################################################################
 
     ##############################################################################################
@@ -357,7 +353,7 @@ for t in range(0,nplots+1,tgap):
 
 
 #times = np.linspace(0,Tf,nplots+1)
-
+exit()
 #print(times)
 CB_color_cycle = ['#377eb8', '#ff7f00', '#4daf4a',
                   '#f781bf', '#a65628', '#984ea3',
