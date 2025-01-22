@@ -5,7 +5,7 @@
 #SBATCH --partition=batch
 #SBATCH --qos=urgent
 #SBATCH --account=gfdl_w
-#SBATCH --time=1:00:00
+#SBATCH --time=5:00:00
 #SBATCH --cluster=c5
 #SBATCH --ntasks=1000
 
@@ -27,7 +27,7 @@ set SCRIPT_AREA = /ncrc/home2/Luan.Santos/SHiELD_duo/SHiELD_build
 #set SCRATCHROOT = "/scratch/cimes/ls9640"
 #set SCRIPT_AREA = /home/ls9640/SHiELD_duo/SHiELD_build
 #set stellar environement
-#source /home/ls9640/workspace_stellar/site/environment.stellar.sh_ok
+#source /home/ls9640/SHiELD_duo/SHiELD_build/site/environment.stellar.sh_ok
 
 ##################################################################################
 # Simulation parameters
@@ -35,9 +35,11 @@ set testcase="122"
 set adv=1             # 1-Putman and Lin 2007 scheme; 2-LT2
 set dg=1              # duogrid (always 1)
 set gtype=0           # grid type(0-equiedge; 2-equiangular)
-set hord=8            # PPM scheme
+set hord=5            # PPM scheme
 set N=48              # N
 set N=96              # N
+set N=192             # N
+set N=384             # N
 
 set mean_depth=25
 set mean_depth=10
@@ -48,9 +50,11 @@ set mean_depth=0.1
 set mean_depth=0.05
 set mean_depth=0.01
 
+set dt_atmos="1000"   # atmos time step
+set dt_atmos="500"   # atmos time step
 set dt_atmos="250"   # atmos time step
 set dt_atmos="125"   # atmos time step
-set n_split="1"       # 
+set n_split="8"       # 
 set dgflag=".true."
 set tf=100              # final time
 set layout=5
@@ -59,11 +63,11 @@ set layout=5
 # set vorticity damping coefficient
 if ($hord == "5") then
    if ($adv == "1") then
-      set vort_damp=0.06
-      set div_damp=0.15
+      set vort_damp=0.19
+      set div_damp=0.19
    else
-      set vort_damp=0.06
-      set div_damp=0.15
+      set vort_damp=0.19
+      set div_damp=0.19
    endif
 else if ($hord == "8") then
    if ($adv == "1") then

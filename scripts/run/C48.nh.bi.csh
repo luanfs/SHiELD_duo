@@ -5,7 +5,7 @@
 #SBATCH --partition=batch
 #SBATCH --qos=urgent
 #SBATCH --account=gfdl_w
-#SBATCH --time=1:00:00
+#SBATCH --time=3:00:00
 #SBATCH --cluster=c5
 #SBATCH --ntasks=1000
 
@@ -19,7 +19,7 @@ set SCRIPT_AREA = /ncrc/home2/Luan.Santos/SHiELD_duo/SHiELD_build
 ##SBATCH --partition=batch
 ##SBATCH --qos=urgent
 ##SBATCH --account=cimes2
-##SBATCH --time=1:00:00
+##SBATCH --time=3:00:00
 ##SBATCH --cluster=stellar
 ##SBATCH --ntasks=1000
 
@@ -27,7 +27,7 @@ set SCRIPT_AREA = /ncrc/home2/Luan.Santos/SHiELD_duo/SHiELD_build
 #set SCRATCHROOT = "/scratch/cimes/ls9640"
 #set SCRIPT_AREA = /home/ls9640/SHiELD_duo/SHiELD_build
 #set stellar environement
-#source /home/ls9640/workspace_stellar/site/environment.stellar.sh_ok
+#source /home/ls9640/SHiELD_duo/SHiELD_build/site/environment.stellar.sh_ok
 
 ##################################################################################
 # Simulation parameters
@@ -49,11 +49,11 @@ set dt_atmos="1920"    # atmos time step
 set dt_atmos="960"    # atmos time step
 set dt_atmos="480"     # atmos time step
 #set dt_atmos="240"     # atmos time step
-set n_split="8"       # 
+set n_split="8"
 set dgflag=".true."
 set test_case="-13"
 set testname="bi"
-set layout=5
+set layout=10
 ##################################################################################
 
 # set divergence/vorticity damping coefficient
@@ -63,7 +63,7 @@ if ($hord == "5") then
       set vort_damp=0.12
    else
       set div_damp=0.14
-      set vort_damp=0.13
+      set vort_damp=0.14
    endif
 else if ($hord == "6") then
    if ($adv == "1") then
@@ -76,11 +76,10 @@ else if ($hord == "6") then
 else if ($hord == "8") then
    if ($adv == "1") then
       set div_damp=0.12
-      set vort_damp=0
+      set vort_damp=0.12
    else
-      set div_damp=0.12
+      set div_damp=0.18
       set vort_damp=0.06
-      set vort_damp=0
    endif
 else
    set vort_damp=0
@@ -191,7 +190,7 @@ setenv MALLOC_TRIM_THRESHOLD_ 536870912
 setenv NC_BLKSZ 1M
 
 # necessary for OpenMP when using Intel
-setenv KMP_STACKSIZE 256m
+setenv KMP_STACKSIZE 4g
 setenv SLURM_CPU_BIND verbose
 
 set RUN_DIR = $PWD
@@ -307,7 +306,7 @@ cat > input.nml <<EOF
 
  &fms_nml
        clock_grain = 'ROUTINE',
-       domains_stack_size = 2000000000,
+       domains_stack_size = 1000000000,
        print_memory_usage = .false.
 /
 

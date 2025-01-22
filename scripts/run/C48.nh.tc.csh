@@ -27,7 +27,7 @@ set SCRIPT_AREA = /ncrc/home2/Luan.Santos/SHiELD_duo/SHiELD_build
 #set SCRATCHROOT = "/scratch/cimes/ls9640"
 #set SCRIPT_AREA = /home/ls9640/SHiELD_duo/SHiELD_build
 #set stellar environement
-#source /home/ls9640/workspace_stellar/site/environment.stellar.sh_ok
+#source /home/ls9640/SHiELD_duo/SHiELD_build/site/environment.stellar.sh_ok
 
 ##################################################################################
 # Simulation parameters
@@ -408,11 +408,11 @@ cat > input.nml <<EOF
        !is_ideal_case = .T.
        mountain = .F.
        d_con = 1.
-       hord_mt = 5
-       hord_vt = 5
-       hord_tm = 5
-       hord_dp = -5
-       hord_tr = -5 ! z2: changed
+       hord_mt = $hord
+       hord_vt = $hord
+       hord_tm = $hord
+       hord_dp = $hord
+       hord_tr = $hord ! z2: changed
        adjust_dry_mass = .F.
        consv_te = 0.0
        fill = .F.
