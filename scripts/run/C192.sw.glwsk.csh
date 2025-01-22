@@ -27,7 +27,7 @@ set SCRIPT_AREA = /ncrc/home2/Luan.Santos/SHiELD_duo/SHiELD_build
 #set SCRATCHROOT = "/scratch/cimes/ls9640"
 #set SCRIPT_AREA = /home/ls9640/SHiELD_duo/SHiELD_build
 #set stellar environement
-#source /home/ls9640/workspace_stellar/site/environment.stellar.sh_ok
+#source /home/ls9640/SHiELD_duo/SHiELD_build/site/environment.stellar.sh_ok
 
 ##################################################################################
 # Simulation parameters
