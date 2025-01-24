@@ -274,7 +274,7 @@ contains
     jep1 = je + 1
 
     if(mpp_pe()==0)then
-      print*, 'time in days: ', time_total/86400d0, 'adv', flagstruct%adv_scheme, 'hord', flagstruct%hord_mt
+      print*, 'time in days: ', time_total/86400d0, 'adv', flagstruct%adv_scheme, 'hord', flagstruct%hord_mt, hydrostatic, flagstruct%inline_q
     endif
     if ( .not.hydrostatic ) then
 
@@ -908,7 +908,7 @@ endif
 
                   !vc(isd,jsd,k), uc_old(isd,jsd,k), vc_old(isd,jsd,k), dt,  &
        call d_sw3(u(isd,jsd,k),    v(isd,jsd,k),  uc(isd,jsd,k),      &
-                  vc(isd,jsd,k), dt,  &
+                  vc(isd,jsd,k), uc_old(isd,jsd,k), vc_old(isd,jsd,k), dt,  &
                   hord_m, gridstruct, flagstruct, bd, &
                   utt(isd,jsd,k),vtt(isd,jsd,k),ubbtemp(is,js,k),vbbtemp(is,js,k), &
                   ubb(is,js,k),vbb(is,js,k))
@@ -1110,6 +1110,7 @@ do k=1,npz
             enddo
        endif
 
+
        if ( flagstruct%d_ext > 0. ) then
             do j=js,jep1
                do i=is,iep1
@@ -1119,6 +1120,7 @@ do k=1,npz
        endif
        if ( flagstruct%d_con > 1.0E-5 .OR. flagstruct%do_diss_est ) then
 ! Average horizontal "convergence" to cell center
+       !if(k==1) print*, 'hi from heat_src', mpp_pe()
             do j=js,je
                do i=is,ie
                   heat_source(i,j,k) = heat_source(i,j,k) + heat_s(i,j,k)
@@ -1126,6 +1128,7 @@ do k=1,npz
                enddo
             enddo
        endif
+       !if(k==1) print*, 'by from heat_src', mpp_pe()
     enddo           ! end openMP k-loop
 
                                     call timing_off('dsw2456')

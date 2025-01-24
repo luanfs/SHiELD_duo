@@ -950,9 +950,24 @@ endif
 
 #ifndef SW_DYNAMICS
        if ( .not. hydrostatic ) then
-            ! not used in sw
-            call fv_tp_2d(w, crx_adv,cry_adv, npx, npy, hord_vt, gx, gy, xfx_adv, yfx_adv, &
-                          gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac, mfx=fx, mfy=fy)
+         if(gridstruct%adv_scheme==1) then
+           call fv_tp_2d(w, crx_adv,cry_adv, npx, npy, hord_vt, gx, gy, xfx_adv, yfx_adv, &
+                         gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac, mfx=fx, mfy=fy)
+
+         else if(gridstruct%adv_scheme==2) then
+           do j=jsd,jed
+              do i=isd,ied
+                 w(i,j) = delp(i,j)*w(i,j)
+              enddo
+           enddo
+           call fv_tp_2d(w, crx_dp2,cry_dp2, npx, npy, hord_vt, gx, gy, xfx_dp2, yfx_dp2, &
+                         gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac, &
+                         advscheme=flagstruct%adv_scheme)
+                         !nord=nord_v, damp_c=damp_v, advscheme=flagstruct%adv_scheme)
+           !call fv_tp_2d(w, crx_adv,cry_adv, npx, npy, hord_vt, gx, gy, xfx_adv, yfx_adv, &
+           !               gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac, mfx=fx, mfy=fy)
+        endif
+
 
         do j=js,je
            do i=is,ie+1
@@ -1032,7 +1047,8 @@ endif
                            xfx_adv, yfx_adv, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac)
             else if(gridstruct%adv_scheme==2) then
                call fv_tp_2d(q(isd,jsd,k,iq), crx_dp2, cry_dp2, npx, npy, hord_tr, gx, gy, &
-                           xfx_dp2, yfx_dp2, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac, advscheme=gridstruct%adv_scheme)
+                           xfx_dp2, yfx_dp2, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac, &
+                           advscheme=gridstruct%adv_scheme)
             endif
          endif
 #else
@@ -1167,12 +1183,20 @@ endif
               gy(i,j)=allflux_y(i,j,k,2)
            enddo
         enddo
-
-            do j=js,je
-               do i=is,ie
-                  w(i,j) = delp(i,j)*w(i,j) + (gx(i,j)-gx(i+1,j)+gy(i,j)-gy(i,j+1))*rarea(i,j)
-               enddo
-            enddo
+          if(flagstruct%adv_scheme==1)then
+             do j=js,je
+                do i=is,ie
+                   w(i,j) = delp(i,j)*w(i,j) + (gx(i,j)-gx(i+1,j)+gy(i,j)-gy(i,j+1))*rarea(i,j)
+                enddo
+             enddo
+          else if(flagstruct%adv_scheme==2)then
+             do j=js,je
+                do i=is,ie
+                   w(i,j) = w(i,j) + (gx(i,j)-gx(i+1,j)+gy(i,j)-gy(i,j+1))*rarea(i,j)
+                enddo
+             enddo
+ 
+          endif
         endif
 
 #ifdef USE_COND
@@ -1359,15 +1383,15 @@ endif
 
  end subroutine d_sw2
 
-   subroutine d_sw3(u, v, uc, vc, &
+   subroutine d_sw3(u, v, uc, vc, uc_old, vc_old, &
                    dt, hord_mt,   &
                    gridstruct, flagstruct, bd, ut, vt, ubbtemp, vbbtemp, ubb, vbb)
 
       integer, intent(IN):: hord_mt
       real   , intent(IN):: dt
       type(fv_grid_bounds_type), intent(IN) :: bd
-      real, intent(INOUT), dimension(bd%isd:bd%ied  ,bd%jsd:bd%jed+1):: u, vc
-      real, intent(INOUT), dimension(bd%isd:bd%ied+1,bd%jsd:bd%jed  ):: v, uc
+      real, intent(INOUT), dimension(bd%isd:bd%ied  ,bd%jsd:bd%jed+1):: u, vc, vc_old
+      real, intent(INOUT), dimension(bd%isd:bd%ied+1,bd%jsd:bd%jed  ):: v, uc, uc_old
 
 
       real,intent(IN) :: ut(bd%isd:bd%ied+1,bd%jsd:bd%jed)
@@ -1378,11 +1402,13 @@ endif
       type(fv_flags_type), intent(IN), target :: flagstruct
 ! Local:
       real, dimension(bd%is:bd%ie+1,bd%js:bd%je+1):: ub, vb
+      real, dimension(bd%is:bd%ie+1,bd%js:bd%je+1):: ub_old, vb_old
 
       real :: dt4, dt5
       integer :: i,j, is2, ie1, js2, je1
 
       real, pointer, dimension(:,:) :: rsina
+      real, pointer, dimension(:,:) :: rsina2, cosa2
       real, pointer, dimension(:,:) ::  cosa
 
       integer :: is,  ie,  js,  je
@@ -1405,6 +1431,9 @@ endif
 
       rsina     => gridstruct%rsina
       cosa      => gridstruct%cosa
+
+      !rsina2    => gridstruct%rsina2
+      !cosa2     => gridstruct%cosa2
 
 #ifdef SW_DYNAMICS
       if (test_case > 1) then
@@ -1434,6 +1463,14 @@ endif
                   vb(i,j) = dt5*(vc(i-1,j)+vc(i,j)-(uc(i,j-1)+uc(i,j))*cosa(i,j))*rsina(i,j)
                enddo
             enddo
+
+            ! Needed by LT2
+            do j=js2-1,je1+1
+               do i=is2,ie1
+                  !vb_old(i,j) = dt5*(vc_old(i-1,j)+vc_old(i,j)-(uc_old(i,j-1)+uc_old(i,j))*cosa2(i,j))*rsina2(i,j)
+               enddo
+            enddo
+
          else
             if ( js==1 ) then
                do i=is,ie+1
@@ -1488,11 +1525,16 @@ endif
          if (bounded_domain .or. flagstruct%duogrid) then
 
             do j=js,je+1
+               do i=is2,ie1
+                  ub(i,j) = dt5*(uc(i,j-1)+uc(i,j)-(vc(i-1,j)+vc(i,j))*cosa(i,j))*rsina(i,j)
+               enddo
+            enddo
 
-                  do i=is2,ie1
-                     ub(i,j) = dt5*(uc(i,j-1)+uc(i,j)-(vc(i-1,j)+vc(i,j))*cosa(i,j))*rsina(i,j)
-                  enddo
-
+            ! Needed by LT2
+            do j=js,je+1
+               do i=is2-1,ie1+1
+                  !ub_old(i,j) = dt5*(uc_old(i,j-1)+uc_old(i,j)-(vc_old(i-1,j)+vc_old(i,j))*cosa2(i,j))*rsina2(i,j)
+               enddo
             enddo
 
 
@@ -2030,7 +2072,8 @@ endif
       !call fv_tp_2d(vort, crx_adv, cry_adv, npx, npy, hord_vt, vortfluxx, vortfluxy, &
       !            xfx_adv,yfx_adv, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac)
       call fv_tp_2d(vort, crx_dp2, cry_dp2, npx, npy, hord_vt, vortfluxx, vortfluxy, &
-                  xfx_dp2,yfx_dp2, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac, advscheme=gridstruct%adv_scheme)
+                    xfx_dp2,yfx_dp2, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac, &
+                    advscheme=gridstruct%adv_scheme)
    endif
 
 

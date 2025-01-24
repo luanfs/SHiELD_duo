@@ -411,6 +411,10 @@ end type duogrid_type
      real, allocatable :: rsin_v(:,:)
      real, allocatable ::  rsina(:,:)
      real, allocatable ::  rsin2(:,:)
+
+     real, allocatable ::   cosa2(:,:)
+     real, allocatable ::   sina2(:,:)
+     real, allocatable ::  rsina2(:,:)
      real(kind=R_GRID), allocatable :: ee1(:,:,:)
      real(kind=R_GRID), allocatable :: ee2(:,:,:)
      real(kind=R_GRID), allocatable :: ec1(:,:,:)
@@ -2062,6 +2066,10 @@ contains
     allocate ( Atm%gridstruct%rsina(is_2d:ie_2d+1,js_2d:je_2d+1) )      ! Why is the size different?
     allocate ( Atm%gridstruct% cosa(isd_2d:ied_2d+1,jsd_2d:jed_2d+1) )   ! COS(angle of intersection)
     allocate ( Atm%gridstruct% cosa_64(isd_2d:ied_2d+1,jsd_2d:jed_2d+1) )   ! COS(angle of intersection)
+
+    allocate ( Atm%gridstruct% cosa2(isd_2d:ied_2d+1,jsd_2d:jed_2d+1) )
+    allocate ( Atm%gridstruct% sina2(isd_2d:ied_2d+1,jsd_2d:jed_2d+1) )
+    allocate ( Atm%gridstruct%rsina2(isd_2d:ied_2d+1,jsd_2d:jed_2d+1) )
 
 
     allocate ( Atm%gridstruct% line_a(isd_2d:ied_2d ) ) ! Cell Centered

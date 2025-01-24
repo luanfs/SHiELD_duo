@@ -113,6 +113,7 @@
       real, pointer, dimension(:,:) :: sina_u, sina_v
       real, pointer, dimension(:,:) :: rsin_u, rsin_v
       real, pointer, dimension(:,:) :: rsina, rsin2
+      real, pointer, dimension(:,:) :: rsina2, cosa2, sina2
       real, pointer, dimension(:,:,:) :: sin_sg, cos_sg
       real(kind=R_GRID), pointer, dimension(:,:,:) :: ee1, ee2, ec1, ec2
       real(kind=R_GRID), pointer, dimension(:,:,:,:) :: ew, es
@@ -158,6 +159,9 @@
       rsin_v => Atm%gridstruct%rsin_v
       rsina => Atm%gridstruct%rsina
       rsin2 => Atm%gridstruct%rsin2
+      rsina2 => Atm%gridstruct%rsina2
+      sina2 => Atm%gridstruct%sina2
+      cosa2 => Atm%gridstruct%cosa2
       ee1 => Atm%gridstruct%ee1
       ee2 => Atm%gridstruct%ee2
       ec1 => Atm%gridstruct%ec1
@@ -461,6 +465,9 @@
            rsin_v = big_number
            rsina  = big_number
            rsin2  = big_number
+           rsina2 = big_number
+           sina2  = big_number
+           cosa2  = big_number
            cosa = big_number
            sina = big_number
 
@@ -493,6 +500,38 @@
               sina(i,j) = 0.5*(sin_sg(i-1,j-1,8)+sin_sg(i,j,6))
            enddo
         enddo
+
+        do j=js-1,je+2
+           do i=is-1,ie+2
+
+! unit vect in X-dir: ee1
+              if (i==1 .and. .not. Atm%gridstruct%bounded_domain) then
+                  call vect_cross(pp, grid3(1,i,  j), grid3(1,i+1,j))
+              elseif(i==npx .and. .not. Atm%gridstruct%bounded_domain) then
+                  call vect_cross(pp, grid3(1,i-1,j), grid3(1,i,  j))
+              else
+                  call vect_cross(pp, grid3(1,i-1,j), grid3(1,i+1,j))
+              endif
+              call vect_cross(ee1(1:3,i,j), pp, grid3(1:3,i,j))
+              call normalize_vect( ee1(1:3,i,j) )
+
+! unit vect in Y-dir: ee2
+              if (j==1 .and. .not. Atm%gridstruct%bounded_domain) then
+                  call vect_cross(pp, grid3(1:3,i,j  ), grid3(1:3,i,j+1))
+              elseif(j==npy .and. .not. Atm%gridstruct%bounded_domain) then
+                  call vect_cross(pp, grid3(1:3,i,j-1), grid3(1:3,i,j  ))
+              else
+                  call vect_cross(pp, grid3(1:3,i,j-1), grid3(1:3,i,j+1))
+              endif
+              call vect_cross(ee2(1:3,i,j), pp, grid3(1:3,i,j))
+              call normalize_vect( ee2(1:3,i,j) )
+
+! symmetrical grid
+              cosa2(i,j) = 0.5*(cos_sg(i-1,j-1,8)+cos_sg(i,j,6))
+              sina2(i,j) = 0.5*(sin_sg(i-1,j-1,8)+sin_sg(i,j,6))
+           enddo
+        enddo
+
 
 !     9---4---8
 !     |       |
@@ -541,6 +580,25 @@
             endif
          enddo
       enddo
+
+!------------------------------------
+! Set special sin values at edges:
+!------------------------------------
+      do j=js-1,je+2
+         do i=is-1,ie+2
+            if ( i==npx .and. j==npy .and. .not. Atm%gridstruct%bounded_domain) then
+            else if ( ( i==1 .or. i==npx .or. j==1 .or. j==npy ) .and. .not. Atm%gridstruct%bounded_domain ) then
+                 rsina2(i,j) = big_number
+            else
+!                rsina(i,j) = 1. / sina(i,j)**2
+                 rsina2(i,j) = 1. / max(tiny_number, sina2(i,j)**2)
+            endif
+         enddo
+      enddo
+      !print*, 'cosa2', minval( cosa2(is-1:ie+2,js-1:je+2)), maxval( cosa2(is-1:ie+2,js-1:je+2))
+      !print*, 'sina2', minval( sina2(is-1:ie+2,js-1:je+2)), maxval( sina2(is-1:ie+2,js-1:je+2))
+      !print*, 'rsina2',minval(rsina2(is-1:ie+2,js-1:je+2)), maxval(rsina2(is-1:ie+2,js-1:je+2))
+      !print*, atm%gridstruct%bounded_domain
 
       do j=jsd,jed
          do i=is,ie+1
@@ -615,6 +673,9 @@
            sina = 1.
            cosa = 0.
            rsina  = 1.
+           rsina2 = 1.
+           cosa2 = 0.
+           sina2 = 1.
            rsin2  = 1.
            sina_u = 1.
            sina_v = 1.
@@ -769,6 +830,9 @@
       nullify(rsin_v)
       nullify(rsina)
       nullify(rsin2)
+      nullify(rsina2)
+      nullify(sina2)
+      nullify(cosa2)
       nullify(ee1)
       nullify(ee2)
       nullify(ec1)

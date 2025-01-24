@@ -9844,10 +9844,12 @@ subroutine error_tc122(bd, delp, u, v, flagstruct, gridstruct, domain, time, ini
       endif
       !write(25,*) linf_error, l1_error, l2_error
       !write(25,*) time/86400.d0, (delp_min-gh0)/gh0, (delp_max-gh0)/gh0
-      write(25,*) time/86400.d0, hlinf_error, ulinf_error, vlinf_error
+      !write(25,*) time/86400.d0, hlinf_error, ulinf_error, vlinf_error
+      write(25,*) time/86400.d0, hlinf_error, hl2_error
       close(25)
       print*, 'time', time/86400.d0, hlinf_error!, l1_error, l2_error
       print*, hlinf_error, ulinf_error, vlinf_error
+      print*, 'meandepth', flagstruct%mean_depth
       !print*, 'minmax', delp_min, delp_max
       print*
    endif
