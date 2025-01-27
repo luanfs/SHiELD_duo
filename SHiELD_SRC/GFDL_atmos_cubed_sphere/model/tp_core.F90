@@ -1488,7 +1488,7 @@ endif
  real  dq(is-3:ie+2)
  integer:: i, j, ie3, is1, ie1, mord
  real:: x0, x1, xt, qtmp, pmp_1, lac_1, pmp_2, lac_2
-
+ 
  if ( .not. bounded_domain .and. grid_type<3 ) then
     is1 = max(3,is-1);  ie3 = min(npx-2,ie+2)
                         ie1 = min(npx-3,ie+1)
@@ -1538,7 +1538,7 @@ else if (iord==8) then
        al(i) = 0.5*(q1(i-1)+q1(i)) + r3*(dm(i-1)-dm(i))
     enddo
 
-    do i=is1,ie1+1
+    do i=is1,ie1
        xt = 2.*dm(i)
        al(i) = q1(i) - sign(min(abs(xt), abs(al(i  )-q1(i))), xt)
        ar(i) = q1(i) + sign(min(abs(xt), abs(al(i+1)-q1(i))), xt)
@@ -1647,7 +1647,7 @@ else if(jord==8) then
      enddo
   enddo
 
-  do j=js1,je1+1
+  do j=js1,je1
      do i=ifirst,ilast
         xt = 2.*dm(i,j)
         al(i,j) = q(i,j) - sign(min(abs(xt), abs(al(i,j)-q(i,j))),   xt)
