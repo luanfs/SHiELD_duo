@@ -1403,13 +1403,16 @@ endif
 ! Local:
       real, dimension(bd%is:bd%ie+1,bd%js:bd%je+1):: ub, vb
       real, dimension(bd%is:bd%ie+1,bd%js:bd%je+1):: ub_old, vb_old
+      real, dimension(bd%is:bd%ie+1,bd%js:bd%je+1):: ub_av, vb_av
+      real, dimension(bd%is-1:bd%ie+2,bd%js  :bd%je+1):: ub2
+      real, dimension(bd%is  :bd%ie+1,bd%js-1:bd%je+2):: vb2
 
       real :: dt4, dt5
       integer :: i,j, is2, ie1, js2, je1
 
       real, pointer, dimension(:,:) :: rsina
-      real, pointer, dimension(:,:) :: rsina2, cosa2
       real, pointer, dimension(:,:) ::  cosa
+      real, pointer, dimension(:,:) :: rsina2, cosa2
 
       integer :: is,  ie,  js,  je
       integer :: isd, ied, jsd, jed
@@ -1432,8 +1435,8 @@ endif
       rsina     => gridstruct%rsina
       cosa      => gridstruct%cosa
 
-      !rsina2    => gridstruct%rsina2
-      !cosa2     => gridstruct%cosa2
+      rsina2    => gridstruct%rsina2
+      cosa2     => gridstruct%cosa2
 
 #ifdef SW_DYNAMICS
       if (test_case > 1) then
@@ -1464,13 +1467,25 @@ endif
                enddo
             enddo
 
-            ! Needed by LT2
-            do j=js2-1,je1+1
-               do i=is2,ie1
-                  !vb_old(i,j) = dt5*(vc_old(i-1,j)+vc_old(i,j)-(uc_old(i,j-1)+uc_old(i,j))*cosa2(i,j))*rsina2(i,j)
+            !--------------------------------------------------------------------------------------------------------
+            if(flagstruct%adv_scheme==2) then
+               ! Needed by LT2
+               do j=js2-1,je1+1
+                  do i=is2,ie1
+                     vb2(i,j) = dt5*(vc(i-1,j)+vc(i,j)-(uc(i,j-1)+uc(i,j))*cosa2(i,j))*rsina2(i,j)
+                  enddo
                enddo
-            enddo
 
+               do j=js2,je1
+                  do i=is2,ie1
+                     vb_old(i,j) = dt5*(vc_old(i-1,j)+vc_old(i,j)-(uc_old(i,j-1)+uc_old(i,j))*cosa2(i,j))*rsina2(i,j)
+                  enddo
+               enddo
+
+               ! compute B-grid departure points in y direction
+               call departure_cfl_rk2_bgrid_y(gridstruct, flagstruct, bd, vb_old, vb2, vb_av, dt)
+            endif
+            !--------------------------------------------------------------------------------------------------------
          else
             if ( js==1 ) then
                do i=is,ie+1
@@ -1510,15 +1525,30 @@ endif
 
       !call ytp_v(is,ie,js,je,isd,ied,jsd,jed, vb, u, v, ub, hord_mt, gridstruct%dy, gridstruct%rdy, &
       !           npx, npy, flagstruct%grid_type, gridstruct, bounded_domain, flagstruct%lim_fac)
-      call ytp_v(is,ie,js,je,isd,ied,jsd,jed, vb, u, v, ub, hord_mt, gridstruct%dy, gridstruct%rdy, &
-                 npx, npy, flagstruct%grid_type, gridstruct, .false., flagstruct%lim_fac)
-
+      if(flagstruct%adv_scheme==1) then
+         call ytp_v(is,ie,js,je,isd,ied,jsd,jed, vb, v, ub, hord_mt, gridstruct%dy, gridstruct%rdy, &
+                    npx, npy, flagstruct%grid_type, gridstruct, .false., flagstruct%lim_fac, &
+                    flagstruct%adv_scheme)
          do j=js,je+1
             do i=is,ie+1
              ubbtemp(i,j)=ub(i,j)
              vbbtemp(i,j)=vb(i,j)
             enddo
          enddo
+
+      else if(flagstruct%adv_scheme==2) then
+         call ytp_v(is,ie,js,je,isd,ied,jsd,jed, vb_av, v, ub, hord_mt, gridstruct%dy, gridstruct%rdy, &
+                    npx, npy, flagstruct%grid_type, gridstruct, .false., flagstruct%lim_fac, &
+                    flagstruct%adv_scheme)
+         do j=js,je+1
+            do i=is,ie+1
+             ubbtemp(i,j)=ub(i,j)
+             vbbtemp(i,j)=vb_av(i,j)
+            enddo
+         enddo
+
+      endif
+
 
       if (flagstruct%grid_type < 3) then
 
@@ -1530,12 +1560,26 @@ endif
                enddo
             enddo
 
+            !--------------------------------------------------------------------------------------------------------
             ! Needed by LT2
-            do j=js,je+1
-               do i=is2-1,ie1+1
-                  !ub_old(i,j) = dt5*(uc_old(i,j-1)+uc_old(i,j)-(vc_old(i-1,j)+vc_old(i,j))*cosa2(i,j))*rsina2(i,j)
+            if(flagstruct%adv_scheme==2) then
+               do j=js,je+1
+                  do i=is2-1,ie1+1
+                     ub2(i,j) = dt5*(uc(i,j-1)+uc(i,j)-(vc(i-1,j)+vc(i,j))*cosa2(i,j))*rsina2(i,j)
+                  enddo
                enddo
-            enddo
+
+               do j=js,je+1
+                  do i=is2,ie1
+                     ub_old(i,j) = dt5*(uc_old(i,j-1)+uc_old(i,j)-(vc_old(i-1,j)+vc_old(i,j))*cosa2(i,j))*rsina2(i,j)
+                  enddo
+               enddo
+
+               ! compute B-grid departure points in x direction
+               call departure_cfl_rk2_bgrid_x(gridstruct, flagstruct, bd, ub_old, ub2, ub_av, dt)
+            endif
+
+            !--------------------------------------------------------------------------------------------------------
 
 
          else
@@ -1575,15 +1619,31 @@ endif
 
       !call xtp_u(is,ie,js,je, isd,ied,jsd,jed, ub, u, v, vb, hord_mt, gridstruct%dx, gridstruct%rdx, &
       !           npx, npy, flagstruct%grid_type, gridstruct, bounded_domain, flagstruct%lim_fac)
-      call xtp_u(is,ie,js,je, isd,ied,jsd,jed, ub, u, v, vb, hord_mt, gridstruct%dx, gridstruct%rdx, &
-                 npx, npy, flagstruct%grid_type, gridstruct, .false., flagstruct%lim_fac)
+      if(flagstruct%adv_scheme==1) then
+         call xtp_u(is,ie,js,je, isd,ied,jsd,jed, ub, u, vb, hord_mt, gridstruct%dx, gridstruct%rdx, &
+                    npx, npy, flagstruct%grid_type, gridstruct, .false., flagstruct%lim_fac, &
+                    flagstruct%adv_scheme)
+         do j=js,je+1
+            do i=is,ie+1
+               ubb(i,j)=ub(i,j)
+               vbb(i,j)=vb(i,j)
+            enddo
+         enddo
 
-do j=js,je+1
-   do i=is,ie+1
-    ubb(i,j)=ub(i,j)
-    vbb(i,j)=vb(i,j)
-   enddo
-enddo
+      else if(flagstruct%adv_scheme==2) then
+         call xtp_u(is,ie,js,je, isd,ied,jsd,jed, ub_av, u, vb, hord_mt, gridstruct%dx, gridstruct%rdx, &
+                    npx, npy, flagstruct%grid_type, gridstruct, .false., flagstruct%lim_fac, &
+                    flagstruct%adv_scheme)
+         do j=js,je+1
+            do i=is,ie+1
+               ubb(i,j)=ub_av(i,j)
+               vbb(i,j)=vb(i,j)
+            enddo
+         enddo
+
+      endif
+
+
 !
 
 #ifdef SW_DYNAMICS
@@ -2739,16 +2799,17 @@ end subroutine divergence_corner_duo
  end subroutine smag_corner
 
 
- subroutine xtp_u(is,ie,js,je,isd,ied,jsd,jed,c, u, v, flux, iord, dx, rdx, npx, npy, grid_type, gridstruct, bounded_domain, lim_fac)
+ subroutine xtp_u(is,ie,js,je,isd,ied,jsd,jed,c, u, flux, iord, dx, rdx, npx, npy, grid_type, &
+                  gridstruct, bounded_domain, lim_fac, adv_scheme)
 
  integer, intent(in):: is,ie,js,je, isd,ied,jsd,jed
  real, INTENT(IN)::   u(isd:ied,jsd:jed+1)
- real, INTENT(IN)::   v(isd:ied+1,jsd:jed)
  real, INTENT(IN)::   c(is:ie+1,js:je+1)
  real, INTENT(out):: flux(is:ie+1,js:je+1)
  real, INTENT(IN) ::   dx(isd:ied,  jsd:jed+1)
  real, INTENT(IN) ::  rdx(isd:ied,  jsd:jed+1)
  integer, INTENT(IN) :: iord, npx, npy, grid_type
+ integer, intent(IN):: adv_scheme
  logical, INTENT(IN) :: bounded_domain
  real, INTENT(IN) ::  lim_fac
  type(fv_grid_type), intent(IN), target :: gridstruct
@@ -2765,6 +2826,11 @@ end subroutine divergence_corner_duo
  integer i, j
  integer is3, ie3
  integer is2, ie2
+ real, pointer, dimension(:) :: rdxc
+ real, pointer, dimension(:,:) :: rnorm_tgx_b
+
+ rdxc => gridstruct%rdx_cs
+ rnorm_tgx_b => gridstruct%rnorm_tgx_b 
 
  if ( bounded_domain .or. grid_type>3 .or. gridstruct%dg%is_initialized ) then
     is3 = is-1        ; ie3 = ie+1
@@ -2838,16 +2904,31 @@ end subroutine divergence_corner_duo
       enddo
 !DEC$ VECTOR ALWAYS
       do i=is,ie+1
-         if( c(i,j)>0. ) then
-             cfl = c(i,j)*rdx(i-1,j)
-             fx0(i) = (1.-cfl)*(br(i-1)-cfl*b0(i-1))
-             flux(i,j) = u(i-1,j)
-         else
-             cfl = c(i,j)*rdx(i,j)
-             fx0(i) = (1.+cfl)*(bl(i)+cfl*b0(i))
-             flux(i,j) = u(i,j)
+         if(adv_scheme==1)then
+            if( c(i,j)>0. ) then
+                cfl = c(i,j)*rdx(i-1,j)
+                fx0(i) = (1.-cfl)*(br(i-1)-cfl*b0(i-1))
+                flux(i,j) = u(i-1,j)
+            else
+                cfl = c(i,j)*rdx(i,j)
+                fx0(i) = (1.+cfl)*(bl(i)+cfl*b0(i))
+                flux(i,j) = u(i,j)
+            endif
+            if (smt5(i-1).or.smt5(i)) flux(i,j) = flux(i,j) + fx0(i)
+
+         else if(adv_scheme==2)then
+            cfl = c(i,j)*rdxc(i)*rnorm_tgx_b(i,j)
+            if( c(i,j)>0. ) then
+                !cfl = c(i,j)*rdx(i-1,j)
+                fx0(i) = (1.-cfl)*(br(i-1)-cfl*b0(i-1))
+                flux(i,j) = u(i-1,j)
+            else
+                !cfl = c(i,j)*rdx(i,j)
+                fx0(i) = (1.+cfl)*(bl(i)+cfl*b0(i))
+                flux(i,j) = u(i,j)
+            endif
+            if (smt5(i-1).or.smt5(i)) flux(i,j) = flux(i,j) + fx0(i)
          endif
-         if (smt5(i-1).or.smt5(i)) flux(i,j) = flux(i,j) + fx0(i)
       enddo
 
      elseif ( iord==2 ) then   ! Perfectly linear
@@ -2877,23 +2958,45 @@ end subroutine divergence_corner_duo
              hi6(i) = smt6(i-1) .or.  smt6(i)
           enddo
           do i=is, ie+1
-             if( c(i,j)>0. ) then
-                 cfl = c(i,j)*rdx(i-1,j)
-                 if ( hi6(i) ) then
-                    fx0(i) = br(i-1) - cfl*b0(i-1)
-                 elseif( hi5(i) ) then
-                    fx0(i) = sign(min(abs(bl(i-1)),abs(br(i-1))), br(i-1))
-                 endif
-                 flux(i,j) = u(i-1,j) + (1.-cfl)*fx0(i)
-             else
-                 cfl = c(i,j)*rdx(i,j)
-                 if ( hi6(i) ) then
-                    fx0(i) = bl(i) + cfl*b0(i)
-                 elseif( hi5(i) ) then
-                    fx0(i) = sign(min(abs(bl(i)),abs(br(i))), bl(i))
-                 endif
-                 flux(i,j) = u(i,j) + (1.+cfl)*fx0(i)
+             if(adv_scheme==1) then
+                if( c(i,j)>0. ) then
+                    cfl = c(i,j)*rdx(i-1,j)
+                    if ( hi6(i) ) then
+                       fx0(i) = br(i-1) - cfl*b0(i-1)
+                    elseif( hi5(i) ) then
+                       fx0(i) = sign(min(abs(bl(i-1)),abs(br(i-1))), br(i-1))
+                    endif
+                    flux(i,j) = u(i-1,j) + (1.-cfl)*fx0(i)
+                else
+                    cfl = c(i,j)*rdx(i,j)
+                    if ( hi6(i) ) then
+                       fx0(i) = bl(i) + cfl*b0(i)
+                    elseif( hi5(i) ) then
+                       fx0(i) = sign(min(abs(bl(i)),abs(br(i))), bl(i))
+                    endif
+                    flux(i,j) = u(i,j) + (1.+cfl)*fx0(i)
+                endif
+             else if(adv_scheme==2) then
+                cfl = c(i,j)*rdxc(i)*rnorm_tgx_b(i,j)
+                if( c(i,j)>0. ) then
+                    !cfl = c(i,j)*rdx(i-1,j)
+                    if ( hi6(i) ) then
+                       fx0(i) = br(i-1) - cfl*b0(i-1)
+                    elseif( hi5(i) ) then
+                       fx0(i) = sign(min(abs(bl(i-1)),abs(br(i-1))), br(i-1))
+                    endif
+                    flux(i,j) = u(i-1,j) + (1.-cfl)*fx0(i)
+                else
+                    !cfl = c(i,j)*rdx(i,j)
+                    if ( hi6(i) ) then
+                       fx0(i) = bl(i) + cfl*b0(i)
+                    elseif( hi5(i) ) then
+                       fx0(i) = sign(min(abs(bl(i)),abs(br(i))), bl(i))
+                    endif
+                    flux(i,j) = u(i,j) + (1.+cfl)*fx0(i)
+                endif
              endif
+
           enddo
 
      elseif ( iord==4 ) then
@@ -2911,16 +3014,31 @@ end subroutine divergence_corner_duo
           enddo
 !DEC$ VECTOR ALWAYS
           do i=is,ie+1
-             if( c(i,j)>0. ) then
-                 cfl = c(i,j)*rdx(i-1,j)
-                 fx0(i) = (1.-cfl)*(br(i-1)-cfl*b0(i-1))
-                 flux(i,j) = u(i-1,j)
-             else
-                 cfl = c(i,j)*rdx(i,j)
-                 fx0(i) = (1.+cfl)*(bl(i)+cfl*b0(i))
-                 flux(i,j) = u(i,j)
+             if(adv_scheme==1) then
+                if( c(i,j)>0. ) then
+                    cfl = c(i,j)*rdx(i-1,j)
+                    fx0(i) = (1.-cfl)*(br(i-1)-cfl*b0(i-1))
+                    flux(i,j) = u(i-1,j)
+                else
+                    cfl = c(i,j)*rdx(i,j)
+                    fx0(i) = (1.+cfl)*(bl(i)+cfl*b0(i))
+                    flux(i,j) = u(i,j)
+                endif
+                if ( hi5(i) ) flux(i,j) = flux(i,j) + fx0(i)
+
+             else if(adv_scheme==2) then
+                cfl = c(i,j)*rdxc(i)*rnorm_tgx_b(i,j)
+                if( c(i,j)>0. ) then
+                    !cfl = c(i,j)*rdx(i-1,j)
+                    fx0(i) = (1.-cfl)*(br(i-1)-cfl*b0(i-1))
+                    flux(i,j) = u(i-1,j)
+                else
+                    !cfl = c(i,j)*rdx(i,j)
+                    fx0(i) = (1.+cfl)*(bl(i)+cfl*b0(i))
+                    flux(i,j) = u(i,j)
+                endif
+                if ( hi5(i) ) flux(i,j) = flux(i,j) + fx0(i)
              endif
-             if ( hi5(i) ) flux(i,j) = flux(i,j) + fx0(i)
           enddo
 
      else    !  iord=5,6,7
@@ -2937,16 +3055,31 @@ end subroutine divergence_corner_duo
 
 !DEC$ VECTOR ALWAYS
         do i=is,ie+1
-           if( c(i,j)>0. ) then
-               cfl = c(i,j)*rdx(i-1,j)
-               fx0(i) = (1.-cfl)*(br(i-1)-cfl*b0(i-1))
-               flux(i,j) = u(i-1,j)
-           else
-               cfl = c(i,j)*rdx(i,j)
-               fx0(i) = (1.+cfl)*(bl(i)+cfl*b0(i))
-               flux(i,j) = u(i,j)
+           if(adv_scheme==1) then
+              if( c(i,j)>0. ) then
+                  cfl = c(i,j)*rdx(i-1,j)
+                  fx0(i) = (1.-cfl)*(br(i-1)-cfl*b0(i-1))
+                  flux(i,j) = u(i-1,j)
+              else
+                  cfl = c(i,j)*rdx(i,j)
+                  fx0(i) = (1.+cfl)*(bl(i)+cfl*b0(i))
+                  flux(i,j) = u(i,j)
+              endif
+              if (smt5(i-1).or.smt5(i)) flux(i,j) = flux(i,j) + fx0(i)
+
+           else if(adv_scheme==2) then
+              cfl = c(i,j)*rdxc(i)*rnorm_tgx_b(i,j)
+              if( c(i,j)>0. ) then
+                  !cfl = c(i,j)*rdx(i-1,j)
+                  fx0(i) = (1.-cfl)*(br(i-1)-cfl*b0(i-1))
+                  flux(i,j) = u(i-1,j)
+              else
+                  !cfl = c(i,j)*rdx(i,j)
+                  fx0(i) = (1.+cfl)*(bl(i)+cfl*b0(i))
+                  flux(i,j) = u(i,j)
+              endif
+              if (smt5(i-1).or.smt5(i)) flux(i,j) = flux(i,j) + fx0(i)
            endif
-           if (smt5(i-1).or.smt5(i)) flux(i,j) = flux(i,j) + fx0(i)
         enddo
 
      endif
@@ -3082,12 +3215,25 @@ end subroutine divergence_corner_duo
         endif
 
         do i=is,ie+1
-           if( c(i,j)>0. ) then
-               cfl = c(i,j)*rdx(i-1,j)
-               flux(i,j) = u(i-1,j) + (1.-cfl)*(br(i-1)-cfl*(bl(i-1)+br(i-1)))
-           else
-               cfl = c(i,j)*rdx(i,j)
-               flux(i,j) = u(i,  j) + (1.+cfl)*(bl(i  )+cfl*(bl(i  )+br(i  )))
+           if(adv_scheme==1)then
+              if( c(i,j)>0. ) then
+                 cfl = c(i,j)*rdx(i-1,j)
+                 flux(i,j) = u(i-1,j) + (1.-cfl)*(br(i-1)-cfl*(bl(i-1)+br(i-1)))
+              else
+                 cfl = c(i,j)*rdx(i,j)
+                 flux(i,j) = u(i,  j) + (1.+cfl)*(bl(i  )+cfl*(bl(i  )+br(i  )))
+              endif
+
+           else if (adv_scheme==2)then
+              cfl = c(i,j)*rdxc(i)*rnorm_tgx_b(i,j)
+              if( c(i,j)>0. ) then
+                 !cfl = c(i,j)*rdx(i-1,j)
+                 flux(i,j) = u(i-1,j) + (1.-cfl)*(br(i-1)-cfl*(bl(i-1)+br(i-1)))
+              else
+                 !cfl = c(i,j)*rdx(i,j)
+                 flux(i,j) = u(i,  j) + (1.+cfl)*(bl(i  )+cfl*(bl(i  )+br(i  )))
+              endif
+
            endif
         enddo
      enddo
@@ -3097,10 +3243,11 @@ end subroutine divergence_corner_duo
  end subroutine xtp_u
 
 
- subroutine ytp_v(is,ie,js,je,isd,ied,jsd,jed, c, u, v, flux, jord, dy, rdy, npx, npy, grid_type, gridstruct, bounded_domain, lim_fac)
+ subroutine ytp_v(is,ie,js,je,isd,ied,jsd,jed, c, v, flux, jord, dy, rdy, npx, npy, grid_type, &
+                  gridstruct, bounded_domain, lim_fac, adv_scheme)
  integer, intent(in):: is,ie,js,je, isd,ied,jsd,jed
  integer, intent(IN):: jord
- real, INTENT(IN)  ::   u(isd:ied,jsd:jed+1)
+ integer, intent(IN):: adv_scheme
  real, INTENT(IN)  ::   v(isd:ied+1,jsd:jed)
  real, INTENT(IN) ::    c(is:ie+1,js:je+1)   !  Courant   N (like FLUX)
  real, INTENT(OUT):: flux(is:ie+1,js:je+1)
@@ -3122,6 +3269,11 @@ end subroutine divergence_corner_duo
  real pmp_1, lac_1, pmp_2, lac_2
  real x0, x1, x0R, x0L
  integer i, j, is1, ie1, js3, je3
+ real, pointer, dimension(:) :: rdyc
+ real, pointer, dimension(:,:) :: rnorm_tgy_b
+
+ rdyc => gridstruct%rdy_cs
+ rnorm_tgy_b => gridstruct%rnorm_tgy_b 
 
  if ( bounded_domain .or. grid_type>3 .or. gridstruct%dg%is_initialized ) then
     js3 = js-1;        je3 = je+1
@@ -3217,16 +3369,31 @@ end subroutine divergence_corner_duo
      do j=js,je+1
 !DEC$ VECTOR ALWAYS
         do i=is,ie+1
-           if( c(i,j)>0. ) then
-               cfl = c(i,j)*rdy(i,j-1)
-               fx0(i) = (1.-cfl)*(br(i,j-1)-cfl*b0(i,j-1))
-               flux(i,j) = v(i,j-1)
-           else
-               cfl = c(i,j)*rdy(i,j)
-               fx0(i) = (1.+cfl)*(bl(i,j)+cfl*b0(i,j))
-               flux(i,j) = v(i,j)
-           endif
-           if (smt5(i,j-1).or.smt5(i,j)) flux(i,j) = flux(i,j) + fx0(i)
+           if(adv_scheme==1)then
+              if( c(i,j)>0. ) then
+                  cfl = c(i,j)*rdy(i,j-1)
+                  fx0(i) = (1.-cfl)*(br(i,j-1)-cfl*b0(i,j-1))
+                  flux(i,j) = v(i,j-1)
+              else
+                  cfl = c(i,j)*rdy(i,j)
+                  fx0(i) = (1.+cfl)*(bl(i,j)+cfl*b0(i,j))
+                  flux(i,j) = v(i,j)
+              endif
+              if (smt5(i,j-1).or.smt5(i,j)) flux(i,j) = flux(i,j) + fx0(i)
+
+            else if(adv_scheme==2)then
+              cfl = c(i,j)*rdyc(j)*rnorm_tgy_b(i,j)
+              if( c(i,j)>0. ) then
+                  !cfl = c(i,j)*rdy(i,j-1)
+                  fx0(i) = (1.-cfl)*(br(i,j-1)-cfl*b0(i,j-1))
+                  flux(i,j) = v(i,j-1)
+              else
+                  !cfl = c(i,j)*rdy(i,j)
+                  fx0(i) = (1.+cfl)*(bl(i,j)+cfl*b0(i,j))
+                  flux(i,j) = v(i,j)
+              endif
+              if (smt5(i,j-1).or.smt5(i,j)) flux(i,j) = flux(i,j) + fx0(i)
+            endif
         enddo
      enddo
 
@@ -3300,16 +3467,32 @@ end subroutine divergence_corner_duo
           enddo
 !DEC$ VECTOR ALWAYS
           do i=is,ie+1
-           if( c(i,j)>0. ) then
-               cfl = c(i,j)*rdy(i,j-1)
-               fx0(i) = (1.-cfl)*(br(i,j-1)-cfl*b0(i,j-1))
-               flux(i,j) = v(i,j-1)
-           else
-               cfl = c(i,j)*rdy(i,j)
-               fx0(i) = (1.+cfl)*(bl(i,j)+cfl*b0(i,j))
-               flux(i,j) = v(i,j)
-           endif
-           if ( hi5(i) ) flux(i,j) = flux(i,j) + fx0(i)
+           if(adv_scheme==1) then
+              if( c(i,j)>0. ) then
+                  cfl = c(i,j)*rdy(i,j-1)
+                  fx0(i) = (1.-cfl)*(br(i,j-1)-cfl*b0(i,j-1))
+                  flux(i,j) = v(i,j-1)
+              else
+                  cfl = c(i,j)*rdy(i,j)
+                  fx0(i) = (1.+cfl)*(bl(i,j)+cfl*b0(i,j))
+                  flux(i,j) = v(i,j)
+              endif
+              if ( hi5(i) ) flux(i,j) = flux(i,j) + fx0(i)
+
+           else if(adv_scheme==2) then
+              cfl = c(i,j)*rdyc(j)*rnorm_tgy_b(i,j)
+              if( c(i,j)>0. ) then
+                  !cfl = c(i,j)*rdy(i,j-1)
+                  fx0(i) = (1.-cfl)*(br(i,j-1)-cfl*b0(i,j-1))
+                  flux(i,j) = v(i,j-1)
+              else
+                  !cfl = c(i,j)*rdy(i,j)
+                  fx0(i) = (1.+cfl)*(bl(i,j)+cfl*b0(i,j))
+                  flux(i,j) = v(i,j)
+              endif
+              if ( hi5(i) ) flux(i,j) = flux(i,j) + fx0(i)
+            endif
+
           enddo
        enddo
 
@@ -3324,16 +3507,31 @@ end subroutine divergence_corner_duo
         do j=js,je+1
 !DEC$ VECTOR ALWAYS
         do i=is,ie+1
-           if( c(i,j)>0. ) then
-               cfl = c(i,j)*rdy(i,j-1)
-               fx0(i) = (1.-cfl)*(br(i,j-1)-cfl*b0(i,j-1))
-               flux(i,j) = v(i,j-1)
-           else
-               cfl = c(i,j)*rdy(i,j)
-               fx0(i) = (1.+cfl)*(bl(i,j)+cfl*b0(i,j))
-               flux(i,j) = v(i,j)
+           if(adv_scheme==1) then
+              if( c(i,j)>0. ) then
+                  cfl = c(i,j)*rdy(i,j-1)
+                  fx0(i) = (1.-cfl)*(br(i,j-1)-cfl*b0(i,j-1))
+                  flux(i,j) = v(i,j-1)
+              else
+                  cfl = c(i,j)*rdy(i,j)
+                  fx0(i) = (1.+cfl)*(bl(i,j)+cfl*b0(i,j))
+                  flux(i,j) = v(i,j)
+              endif
+              if (smt5(i,j-1).or.smt5(i,j)) flux(i,j) = flux(i,j) + fx0(i)
+
+           else if(adv_scheme==2) then
+              cfl = c(i,j)*rdyc(j)*rnorm_tgy_b(i,j)
+              if( c(i,j)>0. ) then
+                  !cfl = c(i,j)*rdy(i,j-1)
+                  fx0(i) = (1.-cfl)*(br(i,j-1)-cfl*b0(i,j-1))
+                  flux(i,j) = v(i,j-1)
+              else
+                  !cfl = c(i,j)*rdy(i,j)
+                  fx0(i) = (1.+cfl)*(bl(i,j)+cfl*b0(i,j))
+                  flux(i,j) = v(i,j)
+              endif
+              if (smt5(i,j-1).or.smt5(i,j)) flux(i,j) = flux(i,j) + fx0(i)
            endif
-           if (smt5(i,j-1).or.smt5(i,j)) flux(i,j) = flux(i,j) + fx0(i)
         enddo
         enddo
      else
@@ -3346,16 +3544,32 @@ end subroutine divergence_corner_duo
         do j=js,je+1
 !DEC$ VECTOR ALWAYS
         do i=is,ie+1
-           if( c(i,j)>0. ) then
-               cfl = c(i,j)*rdy(i,j-1)
-               fx0(i) = (1.-cfl)*(br(i,j-1)-cfl*b0(i,j-1))
-               flux(i,j) = v(i,j-1)
-           else
-               cfl = c(i,j)*rdy(i,j)
-               fx0(i) = (1.+cfl)*(bl(i,j)+cfl*b0(i,j))
-               flux(i,j) = v(i,j)
+           if(adv_scheme==1) then
+              if( c(i,j)>0. ) then
+                  cfl = c(i,j)*rdy(i,j-1)
+                  fx0(i) = (1.-cfl)*(br(i,j-1)-cfl*b0(i,j-1))
+                  flux(i,j) = v(i,j-1)
+              else
+                  cfl = c(i,j)*rdy(i,j)
+                  fx0(i) = (1.+cfl)*(bl(i,j)+cfl*b0(i,j))
+                  flux(i,j) = v(i,j)
+              endif
+              if (smt6(i,j-1).or.smt6(i,j)) flux(i,j) = flux(i,j) + fx0(i)
+
+           else if(adv_scheme==2) then
+              cfl = c(i,j)*rdyc(j)*rnorm_tgy_b(i,j)
+              if( c(i,j)>0. ) then
+                  !cfl = c(i,j)*rdy(i,j-1)
+                  fx0(i) = (1.-cfl)*(br(i,j-1)-cfl*b0(i,j-1))
+                  flux(i,j) = v(i,j-1)
+              else
+                  !cfl = c(i,j)*rdy(i,j)
+                  fx0(i) = (1.+cfl)*(bl(i,j)+cfl*b0(i,j))
+                  flux(i,j) = v(i,j)
+              endif
+              if (smt6(i,j-1).or.smt6(i,j)) flux(i,j) = flux(i,j) + fx0(i)
            endif
-           if (smt6(i,j-1).or.smt6(i,j)) flux(i,j) = flux(i,j) + fx0(i)
+
         enddo
         enddo
      endif
@@ -3541,13 +3755,27 @@ end subroutine divergence_corner_duo
 
    do j=js,je+1
       do i=is,ie+1
-         if(c(i,j)>0.) then
-            cfl = c(i,j)*rdy(i,j-1)
-            flux(i,j) = v(i,j-1) + (1.-cfl)*(br(i,j-1)-cfl*(bl(i,j-1)+br(i,j-1)))
-         else
-            cfl = c(i,j)*rdy(i,j)
-            flux(i,j) = v(i,j  ) + (1.+cfl)*(bl(i,j  )+cfl*(bl(i,j  )+br(i,j  )))
+         if(adv_scheme==1) then
+            if(c(i,j)>0.) then
+               cfl = c(i,j)*rdy(i,j-1)
+               flux(i,j) = v(i,j-1) + (1.-cfl)*(br(i,j-1)-cfl*(bl(i,j-1)+br(i,j-1)))
+            else
+               cfl = c(i,j)*rdy(i,j)
+               flux(i,j) = v(i,j  ) + (1.+cfl)*(bl(i,j  )+cfl*(bl(i,j  )+br(i,j  )))
+            endif
+
+          else if(adv_scheme==2) then
+            cfl = c(i,j)*rdyc(j)*rnorm_tgy_b(i,j)
+            if(c(i,j)>0.) then
+               !cfl = c(i,j)*rdy(i,j-1)
+               flux(i,j) = v(i,j-1) + (1.-cfl)*(br(i,j-1)-cfl*(bl(i,j-1)+br(i,j-1)))
+            else
+               !cfl = c(i,j)*rdy(i,j)
+               flux(i,j) = v(i,j  ) + (1.+cfl)*(bl(i,j  )+cfl*(bl(i,j  )+br(i,j  )))
+            endif
+
          endif
+
       enddo
    enddo
 
@@ -4227,6 +4455,117 @@ subroutine departure_cfl_rk2(gridstruct, flagstruct, bd, crx, cry, &
 
 
 end subroutine departure_cfl_rk2
+
+
+subroutine departure_cfl_rk2_bgrid_x(gridstruct, flagstruct, bd, ub_old, ub, ub_av, dt)
+    !--------------------------------------------------
+    ! Compute the departure CFL for RK2 scheme at B-grid (needed for KE transport)
+    !--------------------------------------------------
+    type(fv_grid_bounds_type), intent(IN) :: bd
+    type(fv_grid_type), intent(IN), target :: gridstruct 
+    type(fv_flags_type), intent(IN), target :: flagstruct
+
+    real, intent(INOUT), dimension(bd%is:bd%ie+1, bd%js:bd%je+1) :: ub_old
+    real, intent(INOUT), dimension(bd%is:bd%ie+1, bd%js:bd%je+1) :: ub_av
+    real, intent(INOUT), dimension(bd%is-1:bd%ie+2,bd%js:bd%je+1):: ub
+ 
+    real, pointer, dimension(:) :: rdxa
+    real, pointer, dimension(:,:) :: rnorm_tgx_b
+    real, intent(IN) :: dt
+
+    ! aux
+    real :: a, a1, a2, c1, c2, u1, u2
+    integer :: i, j
+    integer :: is,  ie,  js,  je
+
+    is  = bd%is
+    ie  = bd%ie
+    js  = bd%js
+    je  = bd%je
+
+    rdxa => gridstruct%rdxa_cs
+    rnorm_tgx_b => gridstruct%rnorm_tgx_b
+
+    ! RK2
+    do j = js, je+1
+       do i = is, ie+1
+          ! Upwind linear interpolation
+          if (ub_old(i,j)>0.d0) then
+             u1 = ub(i-1,j)*rnorm_tgx_b(i-1,j)
+             u2 = ub(i  ,j)*rnorm_tgx_b(i  ,j)
+             a  = ub_old(i,j)*dt*rdxa(i-1)*rnorm_tgx_b(i,j)*0.5d0
+             a1 = a
+             a2 = 1.d0-a
+          else
+             u1 = ub(i  ,j)*rnorm_tgx_b(i  ,j)
+             u2 = ub(i+1,j)*rnorm_tgx_b(i+1,j)
+             a  = ub_old(i,j)*dt*rdxa(i)*rnorm_tgx_b(i,j)*0.5d0
+             a1 = 1.d0+a
+             a2 = -a
+          end if
+          ub_av(i,j) = a1*u1 + a2*u2
+       end do
+    end do
+
+end subroutine departure_cfl_rk2_bgrid_x
+
+
+
+subroutine departure_cfl_rk2_bgrid_y(gridstruct, flagstruct, bd, vb_old, vb, vb_av, dt)
+    !--------------------------------------------------
+    ! Compute the departure CFL for RK2 scheme at B-grid (needed for KE transport)
+    !--------------------------------------------------
+    type(fv_grid_bounds_type), intent(IN) :: bd
+    type(fv_grid_type), intent(IN), target :: gridstruct 
+    type(fv_flags_type), intent(IN), target :: flagstruct
+
+    real, intent(INOUT), dimension(bd%is:bd%ie+1, bd%js:bd%je+1) :: vb_old
+    real, intent(INOUT), dimension(bd%is:bd%ie+1, bd%js:bd%je+1) :: vb_av
+    real, intent(INOUT), dimension(bd%is:bd%ie+1, bd%js-1:bd%je+2):: vb
+ 
+    real, pointer, dimension(:) :: rdya
+    real, pointer, dimension(:,:) :: rnorm_tgy_b
+    real, intent(IN) :: dt
+
+    ! aux
+    real :: a, a1, a2, c1, c2, v1, v2
+    integer :: i, j
+    integer :: is,  ie,  js,  je
+
+    is  = bd%is
+    ie  = bd%ie
+    js  = bd%js
+    je  = bd%je
+
+    rdya => gridstruct%rdya_cs
+    rnorm_tgy_b => gridstruct%rnorm_tgy_b
+
+    ! RK2
+    do j = js, je+1
+       do i = is, ie+1
+          ! Upwind linear interpolation
+          if (vb_old(i,j)>0.d0) then
+             v1 = vb(i,j-1)*rnorm_tgy_b(i,j-1)
+             v2 = vb(i,j  )*rnorm_tgy_b(i,j)
+             a  = vb_old(i,j)*dt*rdya(j-1)*rnorm_tgy_b(i,j)*0.5d0
+             a1 = a
+             a2 = 1.d0-a
+          else
+             v1 = vb(i,j  )*rnorm_tgy_b(i,j)
+             v2 = vb(i,j+1)*rnorm_tgy_b(i,j+1)
+             a  = vb_old(i,j)*dt*rdya(j)*rnorm_tgy_b(i,j)*0.5d0
+             a1 = 1.d0+a
+             a2 = -a
+          end if
+          vb_av(i,j) = a1*v1 + a2*v2
+       end do
+    end do
+
+
+end subroutine departure_cfl_rk2_bgrid_y
+
+
+
 
 subroutine compute_xfx_yfx_rk2(gridstruct, flagstruct, bd, crx, cry, xfx, yfx)
     !--------------------------------------------------
