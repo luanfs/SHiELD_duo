@@ -1692,7 +1692,13 @@ else if (iord<7) then
    goto 666
 
 
-else if (iord==8) then
+else
+
+! Monotonic constraints:
+! ord = 8: PPM with Lin's PPM fast monotone constraint
+! ord = 10: PPM with Lin's modification of Huynh 2nd constraint
+! ord = 13: positive definite constraint
+
     !q1 = qmt
     do i=is-2,ie+2
           xt = 0.25*(q1(i+1) - q1(i-1))
@@ -1704,26 +1710,57 @@ else if (iord==8) then
        al(i) = 0.5*(q1(i-1)+q1(i)) + r3*(dm(i-1)-dm(i))
     enddo
 
-    do i=is1,ie1
-       xt = 2.*dm(i)
-       al(i) = q1(i) - sign(min(abs(xt), abs(al(i  )-q1(i))), xt)
-       ar(i) = q1(i) + sign(min(abs(xt), abs(al(i+1)-q1(i))), xt)
-       al(i) = al(i)*mt_c(i,j)
-       ar(i) = ar(i)*mt_c(i+1,j)
-    enddo
+    if ( iord==8 ) then
+       do i=is1,ie1
+          xt = 2.*dm(i)
+          al(i) = q1(i) - sign(min(abs(xt), abs(al(i  )-q1(i))), xt)
+          ar(i) = q1(i) + sign(min(abs(xt), abs(al(i+1)-q1(i))), xt)
+          al(i) = al(i)*mt_c(i,j)
+          ar(i) = ar(i)*mt_c(i+1,j)
+          bl(i) = al(i) - qmt(i)
+          br(i) = ar(i) - qmt(i)
+       enddo
 
-    do i=is1, ie1
-       bl(i) = al(i) - qmt(i)
-       br(i) = ar(i) - qmt(i)
-    enddo
+    else if( iord==10 )then
 
-    do i=is,ie+1
-       if( c(i,j)>0. ) then
-           flux(i,j) = qmt(i-1) + (1.-c(i,j))*(br(i-1)-c(i,j)*(bl(i-1)+br(i-1)))
-       else
-           flux(i,j) = qmt(i  ) + (1.+c(i,j))*(bl(i  )+c(i,j)*(bl(i)+br(i)))
-       endif
-    enddo
+    else if( iord==11 )then
+! This is emulation of 2nd van Leer scheme using PPM codes
+       do i=is1, ie1
+          xt = ppm_fac*dm(i)
+          al(i) = q1(i) - sign(min(abs(xt), abs(al(i  )-q1(i))), xt)
+          ar(i) = q1(i) + sign(min(abs(xt), abs(al(i+1)-q1(i))), xt)
+          al(i) = al(i)*mt_c(i,j)
+          ar(i) = ar(i)*mt_c(i+1,j)
+          bl(i) = al(i) - qmt(i)
+          br(i) = ar(i) - qmt(i)
+       enddo
+
+    elseif ( iord==7 .or. iord==12 ) then  ! positive definite (Lin & Rood 1996)
+
+    else
+       do i=is1, ie1
+          al(i) = al(i)*mt_c(i,j)
+          ar(i) = ar(i)*mt_c(i+1,j)
+          bl(i) = al(i) - qmt(i)
+          br(i) = ar(i) - qmt(i)
+       enddo
+
+    endif
+
+    ! Positive definite constraint:
+    if(iord==9 .or. iord==13) call pert_ppm(ie1-is1+1, q1(is1), bl(is1), br(is1), 0)
+
+    if(iord==7)then
+
+    else
+       do i=is,ie+1
+          if( c(i,j)>0. ) then
+              flux(i,j) = qmt(i-1) + (1.-c(i,j))*(br(i-1)-c(i,j)*(bl(i-1)+br(i-1)))
+          else
+              flux(i,j) = qmt(i  ) + (1.+c(i,j))*(bl(i  )+c(i,j)*(bl(i)+br(i)))
+          endif
+       enddo
+    endif
 endif
 666   continue
  end subroutine xppm_metric
@@ -1990,7 +2027,13 @@ else if (jord < 7) then
    endif
    return
 
-else if(jord==8) then
+else
+
+! Monotonic constraints:
+! ord = 8: PPM with Lin's PPM fast monotone constraint
+! ord = 10: PPM with Lin's modification of Huynh 2nd constraint
+! ord = 13: positive definite constraint
+
   do j=js-2,je+2
      do i=ifirst,ilast
              xt = 0.25*(q(i,j+1) - q(i,j-1))
@@ -2005,32 +2048,75 @@ else if(jord==8) then
      enddo
   enddo
 
-  do j=js1,je1
-     do i=ifirst,ilast
-        xt = 2.*dm(i,j)
-        al(i,j) = q(i,j) - sign(min(abs(xt), abs(al(i,j)-q(i,j))),   xt)
-        ar(i,j) = q(i,j) + sign(min(abs(xt), abs(al(i,j+1)-q(i,j))), xt)
-        al(i,j) = al(i,j)*mt_d(i,j)
-        ar(i,j) = ar(i,j)*mt_d(i,j+1)
+  if (jord==8) then
+     do j=js1,je1
+        do i=ifirst,ilast
+           xt = 2.*dm(i,j)
+           al(i,j) = q(i,j) - sign(min(abs(xt), abs(al(i,j)-q(i,j))),   xt)
+           ar(i,j) = q(i,j) + sign(min(abs(xt), abs(al(i,j+1)-q(i,j))), xt)
+           al(i,j) = al(i,j)*mt_d(i,j)
+           ar(i,j) = ar(i,j)*mt_d(i,j+1)
+           bl(i,j) = al(i,j) - qmt(i,j)
+           br(i,j) = ar(i,j) - qmt(i,j)
+        enddo
      enddo
-  enddo
 
-  do j=js1,je1
-     do i=ifirst,ilast
-        bl(i,j) = al(i,j) - qmt(i,j)
-        br(i,j) = ar(i,j) - qmt(i,j)
+     do j=js1,je1
+        do i=ifirst,ilast
+        enddo
      enddo
-  enddo
 
-  do j=js,je+1
-    do i=ifirst,ilast
-       if( c(i,j)>0. ) then
-           flux(i,j) = qmt(i,j-1) + (1.-c(i,j))*(br(i,j-1)-c(i,j)*(bl(i,j-1)+br(i,j-1)))
-       else
-           flux(i,j) = qmt(i,j  ) + (1.+c(i,j))*(bl(i,j  )+c(i,j)*(bl(i,j)+br(i,j)))
-       endif
-    enddo
-  enddo
+  else if( jord==10 )then
+
+  else if( jord==11 )then
+! This is emulation of 2nd van Leer scheme using PPM codes
+       do j=js1,je1
+          do i=ifirst,ilast
+             xt = ppm_fac*dm(i,j)
+             al(i,j) = q(i,j) - sign(min(abs(xt), abs(al(i,j)-q(i,j))),   xt)
+             ar(i,j) = q(i,j) + sign(min(abs(xt), abs(al(i,j+1)-q(i,j))), xt)
+             al(i,j) = al(i,j)*mt_d(i,j)
+             ar(i,j) = ar(i,j)*mt_d(i,j+1)
+             bl(i,j) = al(i,j) - qmt(i,j)
+             br(i,j) = ar(i,j) - qmt(i,j)
+          enddo
+       enddo
+
+
+  elseif ( jord==7 .or. jord==12 ) then  ! positive definite (Lin & Rood 1996)
+
+  else
+     do j=js1,je1
+        do i=ifirst,ilast
+           al(i,j) = al(i,j)*mt_d(i,j)
+           ar(i,j) = ar(i,j)*mt_d(i,j+1)
+           bl(i,j) = al(i,j) - qmt(i,j)
+           br(i,j) = ar(i,j) - qmt(i,j)
+        enddo
+     enddo
+
+  endif
+
+  if ( jord==9 .or. jord==13 ) then
+     ! Positive definite constraint:
+     do j=js1,je1
+        call pert_ppm(ilast-ifirst+1, q(ifirst,j), bl(ifirst,j), br(ifirst,j), 0)
+     enddo
+  endif
+
+  if(jord==7)then
+
+  else
+     do j=js,je+1
+       do i=ifirst,ilast
+          if( c(i,j)>0. ) then
+              flux(i,j) = qmt(i,j-1) + (1.-c(i,j))*(br(i,j-1)-c(i,j)*(bl(i,j-1)+br(i,j-1)))
+          else
+              flux(i,j) = qmt(i,j  ) + (1.+c(i,j))*(bl(i,j  )+c(i,j)*(bl(i,j)+br(i,j)))
+          endif
+       enddo
+     enddo
+  endif
  
 
 endif
