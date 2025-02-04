@@ -9567,8 +9567,8 @@ subroutine error_adv_zonal(bd, delp, u, v, flagstruct, gridstruct, domain, time,
 
    master = mpp_root_pe()
    if (mpp_pe()==master) then
-      !print*, 'error', hlinf_error, hl1_error, hl2_error
-      print*, 'error', hlinf_error, ulinf_error, vlinf_error
+      print*, 'error', hlinf_error, hl1_error, hl2_error
+      !print*, 'error', hlinf_error, ulinf_error, vlinf_error
       !print*, maxval(abs(a_covari2l(:,:,is:ie,js:je)))
       filename_error = "error_delp.txt"
       ! open the file
@@ -9578,7 +9578,9 @@ subroutine error_adv_zonal(bd, delp, u, v, flagstruct, gridstruct, domain, time,
          open(59, file=filename_error, status='old', position='append')
       endif
       !write(59,*) linf_error, l1_error, l2_error
-      write(59,*) hlinf_error, ulinf_error, vlinf_error
+      write(59,*) hlinf_error, hl1_error, hl2_error
+      !print*, 'error', hlinf_error, ulinf_error, vlinf_error
+      !write(59,*) hlinf_error, ulinf_error, vlinf_error
       close(59)
    endif
 end subroutine error_adv_zonal
