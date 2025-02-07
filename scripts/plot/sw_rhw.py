@@ -20,8 +20,8 @@ graphdir = '/gpfs/f5/scratch/Luan.Santos/gfdl_w/graphs_solo_sw/'
 #simulation parameters
 N=48
 Tf=105
-gtype = 2
-hords = (8,)
+gtype = 0
+hords = (5,)
 advs  = (1,2)
 testname='rhw'
 dg='dg1'
@@ -149,19 +149,18 @@ pv = np.zeros((N,N,6,nplots+1,len(advs)))
 time = 0  
 tgap=1
 #nplots = 100
-for t in range(0,nplots+1,tgap):
-    print(t)
-    for k, filepath in enumerate(filepaths):
-        for tile in range(0,6):
-            print(time, k, filepath, tile)
-            # Files to be opened
-            atmos_file = filepath+"atmos_daily.tile"+str(tile+1)+".nc"
-            grid_file  = filepath+"grid_spec.tile"+str(tile+1)+".nc"
+for k, filepath in enumerate(filepaths):
+    print(k, filepath)
+    for tile in range(0,6):
+        # Files to be opened
+        atmos_file = filepath+"atmos_daily.tile"+str(tile+1)+".nc"
+        grid_file  = filepath+"grid_spec.tile"+str(tile+1)+".nc"
 
-            # Load the files
-            data = xr.open_dataset(atmos_file, decode_times=False)
-            grid = xr.open_dataset(grid_file , decode_times=False)
+        # Load the files
+        data = xr.open_dataset(atmos_file, decode_times=False)
+        grid = xr.open_dataset(grid_file , decode_times=False)
 
+        for t in range(0,nplots+1,tgap):
             # Variable to be plotted (ps = fluid depth in the SW model)
             if t>=1:
                h[:,:,tile,t,k] = data['ps'][t-1,:,:].values
@@ -174,9 +173,6 @@ for t in range(0,nplots+1,tgap):
                u[:,:,tile,t,k] = data['ua_ic'][:,:].values
                v[:,:,tile,t,k] = data['va_ic'][:,:].values
 
-
-    # time update
-    time = time + tgap*dtplot 
 
 # plot
 time = 0  

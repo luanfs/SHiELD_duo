@@ -19,7 +19,7 @@ graphdir = '/gpfs/f5/scratch/Luan.Santos/gfdl_w/graphs_solo_sw/'
 #----------------------------------------------------------------------------------------------
 #simulation parameters
 N=96
-Tf=100
+Tf=500
 gtype = 0
 hords = (5,)
 advs  = (1,2)
@@ -147,36 +147,33 @@ pv = np.zeros((N,N,6,nplots+1,len(advs)))
 
 # This loop over tiles computes the maximum errors
 time = 0  
-tgap=1
+tgap=4
 #nplots = 100
-for t in range(0,nplots+1,tgap):
-    print(t)
-    for k, filepath in enumerate(filepaths):
-        for tile in range(0,6):
-            print(time, k, filepath, tile)
-            # Files to be opened
-            atmos_file = filepath+"atmos_daily.tile"+str(tile+1)+".nc"
-            grid_file  = filepath+"grid_spec.tile"+str(tile+1)+".nc"
+#print(t)
+for k, filepath in enumerate(filepaths):
+    for tile in range(0,6):
+        #print(time, k, filepath, tile)
+        # Files to be opened
+        atmos_file = filepath+"atmos_daily.tile"+str(tile+1)+".nc"
+        grid_file  = filepath+"grid_spec.tile"+str(tile+1)+".nc"
 
-            # Load the files
-            data = xr.open_dataset(atmos_file, decode_times=False)
-            grid = xr.open_dataset(grid_file , decode_times=False)
+        # Load the files
+        data = xr.open_dataset(atmos_file, decode_times=False)
+        grid = xr.open_dataset(grid_file , decode_times=False)
 
-            # Variable to be plotted (ps = fluid depth in the SW model)
-            if t>=1:
-               h[:,:,tile,t,k] = data['ps'][t-1,:,:].values
-               u[:,:,tile,t,k] = data['ucomp'][t-1,:,:].values
-               v[:,:,tile,t,k] = data['vcomp'][t-1,:,:].values
-               vort[:,:,tile,t,k] = data['vort'][t-1,:,:].values
-               pv[:,:,tile,t,k] = data['pv'][t-1,:,:].values
-            else: #get ic
-               h[:,:,tile,t,k] = data['ps_ic'][:,:].values
-               u[:,:,tile,t,k] = data['ua_ic'][:,:].values
-               v[:,:,tile,t,k] = data['va_ic'][:,:].values
+        # Variable to be plotted (ps = fluid depth in the SW model)
+        for t in range(0,nplots+1,tgap):
+          if t>=1:
+            h[:,:,tile,t,k] = data['ps'][t-1,:,:].values
+            u[:,:,tile,t,k] = data['ucomp'][t-1,:,:].values
+            v[:,:,tile,t,k] = data['vcomp'][t-1,:,:].values
+            vort[:,:,tile,t,k] = data['vort'][t-1,:,:].values
+            pv[:,:,tile,t,k] = data['pv'][t-1,:,:].values
+          else: #get ic
+            h[:,:,tile,t,k] = data['ps_ic'][:,:].values
+            u[:,:,tile,t,k] = data['ua_ic'][:,:].values
+            v[:,:,tile,t,k] = data['va_ic'][:,:].values
 
-
-    # time update
-    time = time + tgap*dtplot 
 
 # plot
 time = 0  
@@ -329,7 +326,8 @@ for t in range(0,nplots+1,tgap):
 
 
     # time update
-    time = time + dtplot 
+    time = time + tgap*dtplot 
+
 
 
 #times = np.linspace(0,Tf,nplots+1)
@@ -339,9 +337,9 @@ CB_color_cycle = ['#377eb8', '#ff7f00', '#4daf4a',
                   '#f781bf', '#a65628', '#984ea3',
                   '#999999', '#e41a1c', '#dede00']
 ax = plt.gca()
-ax.semilogy(times, dif_h[1:], color=CB_color_cycle[0], label='$h$')
-ax.semilogy(times, dif_u[1:], color=CB_color_cycle[1], label='$u$')
-ax.semilogy(times, dif_v[1:], color=CB_color_cycle[2], label='$v$')
+ax.semilogy(times[1:nplots+1:tgap], dif_h[0:nplots:tgap], color=CB_color_cycle[0], label='$h$')
+ax.semilogy(times[1:nplots+1:tgap], dif_u[0:nplots:tgap], color=CB_color_cycle[1], label='$u$')
+ax.semilogy(times[1:nplots+1:tgap], dif_v[0:nplots:tgap], color=CB_color_cycle[2], label='$v$')
 ax.set_xlabel('Time (days)', fontsize=14)
 ax.set_ylabel('Error', fontsize=14)
 ax.tick_params(axis='x', labelsize=14)
