@@ -9,7 +9,7 @@ COMP="repro"      # choices:  debug, repro, prod
 #COMP="debug"
 clear
 cd ../compilation
-./compile_sw.sh $COMP noclean
+#./compile_sw.sh $COMP noclean
 cd -
 
 #----------------------------------------------------------------------------------------------
@@ -77,7 +77,7 @@ alphas=(45 45 45 45 45 45 45 45)
 N=48
 
 #number of grids to be tested (we double the values N for each new grid and divide dt by 2)
-Ng=4
+Ng=5
 
 #----------------------------------------------------------------------------------------------
 
@@ -86,7 +86,7 @@ case $tc in
     #-------------SW tests-------------
     2)
     tcname="geobalance"
-    days="750"
+    days="15"
     dt=3600
     n_split=7
     ;;
