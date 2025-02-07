@@ -75,7 +75,7 @@ contains
 
   subroutine fv_dynamics(npx, npy, npz, nq_tot,  ng, bdt, consv_te, fill,               &
                         reproduce_sum, kappa, cp_air, zvir, ptop, ks, ncnst, n_split,     &
-                        q_split, u, v, w, delz, hydrostatic, duogrid, pt, delp, q,   &
+                        q_split, u0, v0, u, v, w, delz, hydrostatic, duogrid, pt, delp, q,   &
                         ps, pe, pk, peln, pkz, phis, q_con, omga, ua, va, uc, vc, uc_old, vc_old,&
                         forcing_uc, forcing_vc, forcing_ud, forcing_vd, forcing_delp, &
                         ak, bk, mfx, mfy, cx, cy, ze0, hybrid_z, &
@@ -104,6 +104,8 @@ contains
     logical, intent(IN) :: duogrid       !enable duogrid  
 
     type(fv_grid_bounds_type), intent(IN) :: bd
+    real, intent(inout), dimension(bd%isd:,bd%jsd:,1:) :: u0 ! initial (t=0) D grid zonal wind (m/s)
+    real, intent(inout), dimension(bd%isd:,bd%jsd:,1:) :: v0 ! initial (t=0) D grid meridional wind (m/s)
     real, intent(inout), dimension(bd%isd:bd%ied  ,bd%jsd:bd%jed+1,npz) :: u ! D grid zonal wind (m/s)
     real, intent(inout), dimension(bd%isd:bd%ied+1,bd%jsd:bd%jed  ,npz) :: v ! D grid meridional wind (m/s)
     real, intent(inout) :: w(   bd%isd:  ,bd%jsd:  ,1:)  !  W (m/s)
@@ -170,7 +172,7 @@ contains
       real:: pfull(npz)
       real, dimension(bd%is:bd%ie):: cvm
       real, allocatable :: dp1(:,:,:), cappa(:,:,:)
-      real:: akap, rdg, ph1, ph2, mdt, gam, amdt, u0
+      real:: akap, rdg, ph1, ph2, mdt, gam, amdt, u00
       real:: recip_k_split,reg_bc_update_time
       integer:: kord_tracer(ncnst)
       integer :: i,j,k, n, iq, n_map, nq, nr, nwat, k_split
@@ -369,7 +371,7 @@ contains
 !---------------------
       if ( (consv_te > 0. .or. idiag%id_te>0)  .and. (.not.do_adiabatic_init) ) then
            call compute_total_energy(is, ie, js, je, isd, ied, jsd, jed, npz,        &
-                                     u, v, w, delz, pt, delp, q, dp1, pe, peln, phis, &
+                                     u, v, w, delz, pt, delp, q, dp1, q_con, pe, peln, phis, &
                                      gridstruct%rsin2, gridstruct%cosa_s, &
                                      zvir, cp_air, rdgas, hlv, te_2d, ua, va, teq,        &
                                      flagstruct%moist_phys, nwat, sphum, liq_wat, rainwat,   &
@@ -392,9 +394,9 @@ contains
 !            call Ray_fast(abs(dt), npx, npy, npz, pfull, flagstruct%tau, u, v, w,  &
 !                          dp_ref, ptop, hydrostatic, flagstruct%rf_cutoff, bd)
 !         else
-             call Rayleigh_Super(abs(bdt), npx, npy, npz, ks, pfull, phis, flagstruct%tau, u, v, w, pt,  &
+             call Rayleigh_Super(abs(bdt), npx, npy, npz, ks, pfull, phis, flagstruct%tau, u0, v0, u, v, w, pt,  &
                   ua, va, delz, gridstruct%agrid, cp_air, rdgas, ptop, hydrostatic,    &
-                 .not. (gridstruct%bounded_domain .or. flagstruct%is_ideal_case), flagstruct%rf_cutoff, gridstruct, flagstruct, domain, bd)
+                 .not. (gridstruct%bounded_domain .or. flagstruct%is_ideal_case), flagstruct%rf_cutoff, gridstruct, domain, bd, flagstruct%is_ideal_case)
 !         endif
         else
              call Rayleigh_Friction(abs(bdt), npx, npy, npz, ks, pfull, flagstruct%tau, u, v, w, pt,  &
@@ -748,29 +750,29 @@ contains
 
       if ( flagstruct%consv_am .or. prt_minmax ) then
          amdt = g_sum( domain, te_2d, is, ie, js, je, ng, gridstruct%area_64, 0, reproduce=.true.)
-         u0 = -radius*amdt/g_sum( domain, m_fac, is, ie, js, je, ng, gridstruct%area_64, 0,reproduce=.true.)
+         u00 = -radius*amdt/g_sum( domain, m_fac, is, ie, js, je, ng, gridstruct%area_64, 0,reproduce=.true.)
          if(is_master() .and. prt_minmax)         &
-         write(6,*) 'Dynamic AM tendency (Hadleys)=', amdt/(bdt*1.e18), 'del-u (per day)=', u0*86400./bdt
+         write(6,*) 'Dynamic AM tendency (Hadleys)=', amdt/(bdt*1.e18), 'del-u (per day)=', u00*86400./bdt
       endif
 
     if( flagstruct%consv_am ) then
-!$OMP parallel do default(none) shared(is,ie,js,je,m_fac,u0,gridstruct)
+!$OMP parallel do default(none) shared(is,ie,js,je,m_fac,u00,gridstruct)
       do j=js,je
          do i=is,ie
-            m_fac(i,j) = u0*cos(gridstruct%agrid(i,j,2))
+            m_fac(i,j) = u00*cos(gridstruct%agrid(i,j,2))
          enddo
       enddo
 !$OMP parallel do default(none) shared(is,ie,js,je,npz,hydrostatic,pt,m_fac,ua,cp_air, &
-!$OMP                                  u,u0,gridstruct,v )
+!$OMP                                  u,u00,gridstruct,v )
       do k=1,npz
       do j=js,je+1
          do i=is,ie
-            u(i,j,k) = u(i,j,k) + u0*gridstruct%l2c_u(i,j)
+            u(i,j,k) = u(i,j,k) + u00*gridstruct%l2c_u(i,j)
          enddo
       enddo
       do j=js,je
          do i=is,ie+1
-            v(i,j,k) = v(i,j,k) + u0*gridstruct%l2c_v(i,j)
+            v(i,j,k) = v(i,j,k) + u00*gridstruct%l2c_v(i,j)
          enddo
       enddo
       enddo
@@ -926,9 +928,9 @@ contains
 
 
 
- subroutine Rayleigh_Super(dt, npx, npy, npz, ks, pm, phis, tau, u, v, w, pt,  &
-                           ua, va, delz, agrid, cp, rg, ptop, hydrostatic,     &
-                           conserve, rf_cutoff, gridstruct, flagstruct, domain, bd)
+ subroutine Rayleigh_Super(dt, npx, npy, npz, ks, pm, phis, tau, u0, v0, u, v, &
+                           w, pt, ua, va, delz, agrid, cp, rg, ptop, hydrostatic,     &
+                           conserve, rf_cutoff, gridstruct, domain, bd, is_ideal_case)
     real, intent(in):: dt
     real, intent(in):: tau              ! time scale (days)
     real, intent(in):: cp, rg, ptop, rf_cutoff
@@ -936,7 +938,10 @@ contains
     integer, intent(in):: npx, npy, npz, ks
     logical, intent(in):: hydrostatic
     logical, intent(in):: conserve
+    logical, intent(in):: is_ideal_case
     type(fv_grid_bounds_type), intent(IN) :: bd
+    real, intent(inout):: u0(bd%isd:bd%ied  ,bd%jsd:bd%jed+1,npz) ! initial (t=0) D grid zonal wind (m/s)
+    real, intent(inout):: v0(bd%isd:bd%ied+1,bd%jsd:bd%jed,npz) ! initial (t=0) D grid meridional wind (m/s)
     real, intent(inout):: u(bd%isd:bd%ied  ,bd%jsd:bd%jed+1,npz) ! D grid zonal wind (m/s)
     real, intent(inout):: v(bd%isd:bd%ied+1,bd%jsd:bd%jed,npz) ! D grid meridional wind (m/s)
     real, intent(inout)::  w(bd%isd:      ,bd%jsd:      ,1: ) ! cell center vertical wind (m/s)
@@ -947,11 +952,9 @@ contains
     real,   intent(in) :: agrid(bd%isd:bd%ied,  bd%jsd:bd%jed,2)
     real, intent(in) :: phis(bd%isd:bd%ied,bd%jsd:bd%jed)     ! Surface geopotential (g*Z_surf)
     type(fv_grid_type), intent(INOUT) :: gridstruct
-    type(fv_flags_type), intent(INOUT) :: flagstruct
     type(domain2d), intent(INOUT) :: domain
 !
     real, allocatable ::  u2f(:,:,:)
-    real, parameter:: u0   = 60.   ! scaling velocity
     real, parameter:: sday = 86400.
     real rcv, tau0
     integer i, j, k
@@ -971,19 +974,19 @@ contains
     rcv = 1. / (cp - rg)
 
      if ( .not. RF_initialized ) then
-        if (flagstruct%is_ideal_case )then
+        if ( is_ideal_case )then
           allocate ( u00(is:ie,  js:je+1,npz) )
           allocate ( v00(is:ie+1,js:je  ,npz) )
-!$OMP parallel do default(none) shared(is,ie,js,je,npz,u00,u,v00,v)
+!$OMP parallel do default(none) shared(is,ie,js,je,npz,u00,u0,v00,v0)
           do k=1,npz
              do j=js,je+1
                 do i=is,ie
-                   u00(i,j,k) = u(i,j,k)
+                   u00(i,j,k) = u0(i,j,k)
                 enddo
              enddo
              do j=js,je
                 do i=is,ie+1
-                   v00(i,j,k) = v(i,j,k)
+                   v00(i,j,k) = v0(i,j,k)
                 enddo
              enddo
           enddo
@@ -1034,11 +1037,11 @@ endif
                                         call timing_off('COMM_TOTAL')
 
 !$OMP parallel do default(none) shared(is,ie,js,je,kmax,pm,rf_cutoff,w,rf,u,v, &
-!$OMP                                  u00,v00, flagstruct, &
+!$OMP                                  u00,v00,is_ideal_case, &
 !$OMP                                  conserve,hydrostatic,pt,ua,va,u2f,cp,rg,ptop,rcv)
      do k=1,kmax
         if ( pm(k) < rf_cutoff ) then
-           if (flagstruct%is_ideal_case) then
+           if (is_ideal_case) then
               if (.not. hydrostatic) then
                  do j=js,je
                     do i=is,ie

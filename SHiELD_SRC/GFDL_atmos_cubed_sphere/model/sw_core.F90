@@ -1541,7 +1541,7 @@ endif
 
       !call ytp_v(is,ie,js,je,isd,ied,jsd,jed, vb, u, v, ub, hord_mt, gridstruct%dy, gridstruct%rdy, &
       !           npx, npy, flagstruct%grid_type, gridstruct, bounded_domain, flagstruct%lim_fac)
-      if(flagstruct%adv_scheme==1) then
+      if(flagstruct%adv_scheme>=1) then
          call ytp_v(is,ie,js,je,isd,ied,jsd,jed, vb, v, ub, hord_mt, gridstruct%dy, gridstruct%rdy, &
                     npx, npy, flagstruct%grid_type, gridstruct, .false., flagstruct%lim_fac, &
                     flagstruct%adv_scheme)
@@ -1642,7 +1642,7 @@ endif
 
       !call xtp_u(is,ie,js,je, isd,ied,jsd,jed, ub, u, v, vb, hord_mt, gridstruct%dx, gridstruct%rdx, &
       !           npx, npy, flagstruct%grid_type, gridstruct, bounded_domain, flagstruct%lim_fac)
-      if(flagstruct%adv_scheme==1) then
+      if(flagstruct%adv_scheme>=1) then
          call xtp_u(is,ie,js,je, isd,ied,jsd,jed, ub, u, vb, hord_mt, gridstruct%dx, gridstruct%rdx, &
                     npx, npy, flagstruct%grid_type, gridstruct, .false., flagstruct%lim_fac, &
                     flagstruct%adv_scheme)

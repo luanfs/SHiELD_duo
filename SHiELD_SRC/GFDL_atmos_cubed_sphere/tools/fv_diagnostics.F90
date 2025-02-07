@@ -896,7 +896,7 @@ contains
                'zonal wind', 'm/sec', missing_value=missing_value, range=vrange )
           id_v_plev = register_diag_field ( trim(field), 'v_plev', axe2(1:3), Time,        &
                'meridional wind', 'm/sec', missing_value=missing_value, range=vrange )
-          if (is_ideal_case) then
+          if (Atm(n)%flagstruct%is_ideal_case) then
              id_t_plev = register_diag_field ( trim(field), 't_plev', axe2(1:3), Time,        &
                   'temperature', 'K', missing_value=missing_value )
           else
@@ -1003,7 +1003,7 @@ contains
           if ( .not. Atm(n)%flagstruct%hydrostatic )                                        &
                id_w = register_diag_field ( trim(field), 'w', axes(1:3), Time,        &
                'vertical wind', 'm/sec', missing_value=missing_value, range=wrange )
-          if (is_ideal_case) then
+          if (Atm(n)%flagstruct%is_ideal_case) then
              id_pt   = register_diag_field ( trim(field), 'temp', axes(1:3), Time,       &
                   'temperature', 'K', missing_value=missing_value )
           else
@@ -1767,7 +1767,7 @@ contains
          call range_check('VA', Atm(n)%va, isc, iec, jsc, jec, ngc, npz, Atm(n)%gridstruct%agrid,   &
                            -250., 250., bad_range, Time)
 #ifndef SW_DYNAMICS
-         if (is_ideal_case) then
+         if (Atm(n)%flagstruct%is_ideal_case) then
             call range_check('TA', Atm(n)%pt, isc, iec, jsc, jec, ngc, npz, Atm(n)%gridstruct%agrid,   &
                            100., 500., bad_range, Time) !DCMIP ICs have very wide range of temperatures
          else

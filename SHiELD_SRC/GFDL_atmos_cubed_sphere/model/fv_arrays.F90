@@ -568,6 +568,7 @@ end type duogrid_type
    real    :: scale_z = 0.   !< diff_z = scale_z**2 * 0.25 (only used for Riemann solver)
    real    :: w_max = 75.    !< Not used.
    real    :: z_min = 0.05   !< Not used.
+   real    :: d2bg_zq = 0.0  !< Implicit vertical diffusion for scalars (currently vertical velocity only)
    real    :: lim_fac = 1.0  !< linear scheme limiting factor when using hord = 1. 1: hord = 5, 3: hord = 6
 
    integer :: nord=1         !< Order of divergence damping: 0 for second-order; 1 for fourth-order
@@ -580,7 +581,8 @@ end type duogrid_type
    real    :: dddmp = 0.0    !< Dimensionless coefficient for the second-order Smagorinsky-type
                              !< divergence damping. The default is value is 0.0. 0.2
                              !< (the Smagorinsky constant) is recommended if ICs are noisy.
-   real    :: d2_bg = 0.0    !< Coefficient for explicit second-order divergence damping.
+  real    :: smag2d = 0.0   !< Dimensionless coefficient for 2d smag damping. Experimental!!
+  real    :: d2_bg = 0.0    !< Coefficient for explicit second-order divergence damping.
                              !< This option remains active even if nord is nonzero. The default
                              !< value is 0.0. The proper range is 0 to 0.02, with 0 strongly recommended
                              !< except for LES simulation.
@@ -651,10 +653,15 @@ end type duogrid_type
    logical :: do_fast_phys = .false.!< Controls fast physics, in which the SA-TKE-EDMF and part of the GWD are 
                                     !< within the acoustic time step of FV3. If .true. disabling the SA-TKE-EDMF 
                                     !< and part of the GWD in the intermediate physics.
+   logical :: do_intermediate_phys = .true.!< Controls intermediate physics, in which the GFDL MP, SA-SAS and part of the GWD are
+                                    !< within the remapping time step of FV3. If .false. disabling the GFDL MP, SA-SAS
+                                    !< and part of the GWD in the intermediate physics.
    logical :: do_inline_mp = .false.!< Controls Inline GFDL cloud microphysics, in which the full microphysics is
                                     !< called entirely within FV3. If .true. disabling microphysics within the physics
                                     !< is very strongly recommended. .false. by default.
    logical :: do_aerosol = .false.  !< Controls climatological aerosol data used in the GFDL cloud microphyiscs.
+                                    !< .false. by default.
+   logical :: do_cosp = .false.     !< Controls COSP
                                     !< .false. by default.
    logical :: do_f3d    = .false.   !
    logical :: no_dycore = .false.   !< Disables execution of the dynamical core, only running
@@ -984,6 +991,9 @@ end type duogrid_type
    real    :: rf_cutoff = 30.E2   !< Pressure below which no Rayleigh damping is applied if tau > 0.
    real    :: te_err = 1.e-5 !< 64bit: 1.e-14, 32bit: 1.e-7; turn off to save computer time
    real    :: tw_err = 1.e-8 !< 64bit: 1.e-14, 32bit: 1.e-7; turn off to save computer time
+   real    :: fast_tau_w_sec = 0.0 !< Time scale (seconds) for Rayleigh damping applied to vertical velocity only.
+                                   !< Values of 0.2 are very effective at eliminating spurious vertical motion in
+                                   !< the stratosphere. Default is 0.0, which disables this.
    logical :: filter_phys = .false.
    logical :: dwind_2d = .false.   !< Whether to use a simpler & faster algorithm for interpolating
                                    !< the A-grid (cell-centered) wind tendencies computed from the physics
@@ -1186,6 +1196,8 @@ end type duogrid_type
   real(kind=R_GRID) :: deglat=15.   !< Latitude (in degrees) used to compute the uniform f-plane
                                     !< Coriolis parameter for doubly-periodic simulations
                                     !< (grid_type = 4). The default value is 15.
+  real(kind=R_GRID) :: domain_deg = 0.
+
   !The following deglat_*, deglon_* options are not used.
   real(kind=R_GRID) :: deglon_start = -30., deglon_stop = 30., &  !< boundaries of latlon patch
                        deglat_start = -30., deglat_stop = 30.
@@ -1923,12 +1935,6 @@ contains
         enddo
         do j=jsd, jed+1
            do i=isd, ied
-               Atm%u(i,j,k) = 0.
-              Atm%vc(i,j,k) = real_big
-           enddo
-        enddo
-        do j=jsd, jed+1
-           do i=isd, ied
               if (Atm%flagstruct%is_ideal_case) then
                  Atm%u0(i,j,k) = 0.
               endif
@@ -1941,12 +1947,6 @@ contains
               if (Atm%flagstruct%is_ideal_case) then
                  Atm%v0(i,j,k) = 0.
               endif
-               Atm%v(i,j,k) = 0.
-              Atm%uc(i,j,k) = real_big
-           enddo
-        enddo
-        do j=jsd, jed
-           do i=isd, ied+1
                Atm%v(i,j,k) = 0.
               Atm%uc(i,j,k) = real_big
            enddo
