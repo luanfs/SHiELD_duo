@@ -502,7 +502,7 @@ endif
 !     d_sw :: D-Grid Shallow Water Routine
 
    subroutine d_sw1( delp, pt, w, uc,vc, uc_old,vc_old, &
-                    xflux, yflux, cx, cy,              &
+                    xflux, yflux, cx, cy, cx_dp2, cy_dp2, &
                    crx_adv, cry_adv,  xfx_adv, yfx_adv,   &
                    crx_dp2, cry_dp2,  xfx_dp2, yfx_dp2, q_con,     &
                     nq, q, k, km, inline_q,  &
@@ -529,6 +529,8 @@ endif
 !------------------------
       real, intent(INOUT)::    cx(bd%is:bd%ie+1,bd%jsd:bd%jed  )
       real, intent(INOUT)::    cy(bd%isd:bd%ied,bd%js:bd%je+1)
+      real, intent(INOUT)::    cx_dp2(bd%is:bd%ie+1,bd%jsd:bd%jed  )
+      real, intent(INOUT)::    cy_dp2(bd%isd:bd%ied,bd%js:bd%je+1)
       logical, intent(IN):: hydrostatic
       logical, intent(IN):: inline_q
       real, intent(OUT), dimension(bd%is:bd%ie+1,bd%jsd:bd%jed):: crx_adv, xfx_adv
@@ -948,6 +950,18 @@ endif
            enddo
         enddo
 
+        if(gridstruct%adv_scheme==2)then
+           do j=jsd,jed
+               do i=is,ie+1
+                 cx_dp2(i,j) = cx_dp2(i,j) + crx_dp2(i,j)
+              enddo
+           enddo
+           do j=js,je+1
+              do i=isd,ied
+                 cy_dp2(i,j) = cy_dp2(i,j) + cry_dp2(i,j)
+              enddo
+           enddo
+        endif
 #ifndef SW_DYNAMICS
        if ( .not. hydrostatic ) then
          if(gridstruct%adv_scheme==1) then

@@ -92,7 +92,7 @@ contains
 
  subroutine dyn_core(npx, npy, npz, ng, sphum, nq, bdt, n_map, n_split, zvir, cp, akap, cappa, grav, hydrostatic,  &
                      duogrid, u,  v,  w, delz, pt, q, delp, pe, pk, phis, ws, omga, ptop, pfull, ua, va, &
-                     uc, vc, uc_old, vc_old, mfx, mfy, cx, cy, pkz, peln, q_con, ak, bk, ks, &
+                     uc, vc, uc_old, vc_old, mfx, mfy, cx, cy, cx_dp2, cy_dp2, pkz, peln, q_con, ak, bk, ks, &
                      forcing_uc, forcing_vc, forcing_ud, forcing_vd, forcing_delp, &
                      gridstruct, flagstruct, neststruct, idiag, bd, domain, &
                      init_step, i_pack, end_step, diss_est, consv, te0_2d, time_total)
@@ -164,6 +164,8 @@ contains
 ! Accumulated Courant number arrays
     real, intent(inout)::  cx(bd%is:bd%ie+1, bd%jsd:bd%jed, npz)
     real, intent(inout)::  cy(bd%isd:bd%ied ,bd%js:bd%je+1, npz)
+    real, intent(inout)::  cx_dp2(bd%is:bd%ie+1, bd%jsd:bd%jed, npz)
+    real, intent(inout)::  cy_dp2(bd%isd:bd%ied ,bd%js:bd%je+1, npz)
     real, intent(inout),dimension(bd%is:bd%ie,bd%js:bd%je,npz):: pkz
 
     type(fv_grid_type),  intent(INOUT), target :: gridstruct
@@ -274,7 +276,7 @@ contains
     jep1 = je + 1
 
     if(mpp_pe()==0)then
-      !print*, 'time in days: ', time_total/86400d0, 'adv', flagstruct%adv_scheme, 'hord', flagstruct%hord_mt, hydrostatic, flagstruct%inline_q
+      print*, 'time in days: ', time_total/86400d0, 'adv', flagstruct%adv_scheme, 'hord', flagstruct%hord_mt, hydrostatic, flagstruct%inline_q
     endif
     if ( .not.hydrostatic ) then
 
@@ -338,6 +340,9 @@ contains
     call init_ijk_mem(is, ie  , js,  je+1, npz, mfy, 0.)
     call init_ijk_mem(is, ie+1, jsd, jed,  npz, cx, 0.)
     call init_ijk_mem(isd, ied, js,  je+1, npz, cy, 0.)
+    call init_ijk_mem(is, ie+1, jsd, jed,  npz, cx_dp2, 0.)
+    call init_ijk_mem(isd, ied, js,  je+1, npz, cy_dp2, 0.)
+
 
     if ( flagstruct%d_con > 1.0E-5 ) then
          allocate( heat_source(isd:ied, jsd:jed, npz) )
@@ -789,7 +794,7 @@ endif
 !TODO: recheck the omp variables in the subsequent d_swx calls
 !$OMP parallel do default(none) shared(npz,flagstruct,nord_v,pfull,damp_vt,hydrostatic,last_step, &
 !$OMP                                  is,ie,js,je,isd,ied,jsd,jed,omga,delp,gridstruct,npx,npy,  &
-!$OMP                                  ng,zh,vt,ptc,pt,u,v,w,uc,vc,uc_old,vc_old,ua,va,divgd,mfx,mfy,cx,cy,     &
+!$OMP                                  ng,zh,vt,ptc,pt,u,v,w,uc,vc,uc_old,vc_old,ua,va,divgd,mfx,mfy,cx,cy,cx_dp2,cy_dp2, &
 !$OMP                                  crx,cry,xfx,yfx,crx_dp2,cry_dp2,xfx_dp2,yfx_dp2,q_con,zvir,sphum,nq,q,dt,bd,rdt,iep1,jep1, &
 !$OMP                                  heat_source,allflux_x, allflux_y,rax,ray,utt,vtt, &
 !$OMP                                  ubb,vbb,ubbtemp,vbbtemp, &
@@ -891,7 +896,8 @@ endif
        call d_sw1( delp(isd,jsd,k),  pt(isd,jsd,k),      &
                   w(isd:,jsd:,k),  uc(isd,jsd,k),      &
                   vc(isd,jsd,k),   uc_old(isd,jsd,k), vc_old(isd,jsd,k), &
-                  mfx(is, js, k),  mfy(is, js, k),  cx(is, jsd,k),  cy(isd,js, k),    &
+                  mfx(is, js, k),  mfy(is, js, k),  cx(is, jsd,k),  cy(isd,js, k),  &
+                  cx_dp2(is, jsd,k),  cy_dp2(isd,js, k),   &
                   crx(is, jsd,k),  cry(isd,js, k), xfx(is, jsd,k), yfx(isd,js, k),    &
                   crx_dp2(is, jsd,k),  cry_dp2(isd,js, k), xfx_dp2(is, jsd,k), yfx_dp2(isd,js, k),    &
 #ifdef USE_COND
@@ -1031,7 +1037,7 @@ endif !if duo
                                     call timing_on('dsw2456')
 !$OMP parallel do default(none) shared(npz,flagstruct,nord_v,pfull,damp_vt,hydrostatic, duogrid,last_step, &
 !$OMP                                  is,ie,js,je,isd,ied,jsd,jed,omga,delp,gridstruct,npx,npy,  &
-!$OMP                                  ng,zh,vt,ptc,pt,u,v,w,uc,vc,ua,va,divgd,mfx,mfy,cx,cy,     &
+!$OMP                                  ng,zh,vt,ptc,pt,u,v,w,uc,vc,ua,va,divgd,mfx,mfy,cx,cy,cx_dp2,cy_dp2, &
 !$OMP                                  crx,cry,xfx,yfx,crx_dp2,cry_dp2,xfx_dp2,yfx_dp2,q_con,zvir,sphum,nq,q,dt,bd,rdt,iep1,jep1, &
 !$OMP                                  heat_source, diss_est, allflux_x, allflux_y,rax,ray,utt,vtt, &
 !$OMP                                  kee,dw, wkk, ubb, vbb, ubbtemp, vbbtemp, vortfluxx, vortfluxy, &
