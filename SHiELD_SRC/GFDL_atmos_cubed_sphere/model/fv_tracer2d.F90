@@ -268,6 +268,14 @@ contains
     end if
     call mp_reduce_max(cmax, npz)
 
+    if(adv_scheme==2)then
+      call timing_on('COMM_TOTAL')
+      call timing_on('COMM_TRACER')
+      call ext_scalar(dp1, gridstruct%dg, bd, domain, 0, 0)
+      call timing_off('COMM_TRACER')
+      call timing_off('COMM_TOTAL')
+    endif
+
 !$OMP parallel do default(none) shared(is,ie,js,je,isd,ied,jsd,jed,npz,cx,xfx, &
 !$OMP                                  cy,yfx,mfx,mfy,cmax)   &
 !$OMP                          private(nsplt, frac)
@@ -352,12 +360,6 @@ contains
           end do! iq
         else if(adv_scheme==2) then
           do iq = 1, nq
-            if(iq==1)then
-              if(mpp_pe()==0) print*
-              if(mpp_pe()==0) print*, 'before', k, maxval(abs(q(isd:ied,jsd:jed,k,iq)))
-              !if(mpp_pe()==0) print*, 'before cx', iq, maxval(abs(cx_dp2))
-              !if(mpp_pe()==0) print*, 'before cy', iq, maxval(abs(cy_dp2))
-            endif
             !$OMP parallel do default(none) shared(k,isd,ied,jsd,jed,iq,dp1,q)
             do j = jsd, jed
               do i = isd, ied
@@ -376,16 +378,12 @@ contains
                 q(i, j, k, iq) = (q(i, j, k, iq) + (fx(i, j) - fx(i + 1, j) + fy(i, j) - fy(i, j + 1))*rarea(i, j))/delp(i, j, k)
               end do
             end do
-            if(iq==1)then
-              if(mpp_pe()==0) print*, 'after', k, maxval(abs(q(is:ie,js:je,k,iq)))
-            endif
           end do! iq
 
         end if
       end if
 
       if (nsplt /= 1) then
-              print*, '========================================= ============================ =========================='
 
         do it = 1, nsplt
 
