@@ -509,7 +509,7 @@ endif
                    dt, hord_tr, hord_vt, hord_tm, hord_dp,   &
                    nord_v, nord_t, damp_v, &
                    damp_t, hydrostatic, gridstruct, flagstruct, bd, &
-                   allflux_x, allflux_y, ra_x, ra_y, ut, vt)
+                   allflux_x, allflux_y, ra_x, ra_y, ut, vt, lt2_weight)
 
       integer, intent(IN):: hord_tr, hord_vt, hord_tm, hord_dp
       integer, intent(IN):: nord_v ! vorticity damping
@@ -517,6 +517,7 @@ endif
       integer, intent(IN):: nq, k, km
       real   , intent(IN):: dt
       real,    intent(in):: damp_v, damp_t
+      real,    intent(in):: lt2_weight
       type(fv_grid_bounds_type), intent(IN) :: bd
       real, intent(INOUT), dimension(bd%isd:bd%ied,  bd%jsd:bd%jed):: delp, pt
       real, intent(INOUT), dimension(bd%isd:      ,  bd%jsd:      ):: w, q_con
@@ -953,12 +954,12 @@ endif
         if(gridstruct%adv_scheme==2)then
            do j=jsd,jed
                do i=is,ie+1
-                 cx_dp2(i,j) = cx_dp2(i,j) + crx_dp2(i,j)
+                 cx_dp2(i,j) = cx_dp2(i,j) + lt2_weight*crx_dp2(i,j)
               enddo
            enddo
            do j=js,je+1
               do i=isd,ied
-                 cy_dp2(i,j) = cy_dp2(i,j) + cry_dp2(i,j)
+                 cy_dp2(i,j) = cy_dp2(i,j) + lt2_weight*cry_dp2(i,j)
               enddo
            enddo
         endif

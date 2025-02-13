@@ -207,6 +207,12 @@ contains
     real ebuffer(npy+2,npz)
     real nbuffer(npx+2,npz)
     real sbuffer(npx+2,npz)
+    real :: cr_weights(1:n_split) ! These weights are specifically designed to interpolate the time averaged wind field
+                                  ! centered at a longer time step (dt_atmos).
+                                  ! Used by LT2 only to compute cx_rk2 and cy_rk2 needed by
+                                  ! tracers advection.
+    real :: cr_weight
+
     real ::  fxx_delp(bd%isd:bd%ied+1, bd%jsd:bd%jed,   npz)
     real ::  fyy_delp(bd%isd:bd%ied  , bd%jsd:bd%jed+1, npz)
     real ::  tempfx1(bd%isd:bd%ied+1, bd%jsd:bd%jed+1,   npz)
@@ -363,7 +369,7 @@ contains
          endif
     endif
 
-
+    call coeffs_cr(n_split, cr_weights)
 
 !-----------------------------------------------------
   do it=1,n_split
@@ -389,6 +395,9 @@ if (.not. duogrid ) then
      call start_group_halo_update(i_pack(8), u, v, domain, gridtype=DGRID_NE)
 endif
 #endif
+
+     cr_weight = cr_weights(it)
+
      if ( flagstruct%breed_vortex_inline .or. it==n_split ) then
           remap_step = .true.
      else
@@ -800,7 +809,7 @@ endif
 !$OMP                                  ubb,vbb,ubbtemp,vbbtemp, &
 !$OMP                                  diss_est,radius,                 &
 !$OMP                          nord_k, nord_w, nord_t, damp_w, damp_t, d2_divg,   &
-!$OMP                          d_con_k,kgb, hord_m, hord_v, hord_t, hord_p, wk, heat_s, diss_e, z_rat)
+!$OMP                          d_con_k,kgb, hord_m, hord_v, hord_t, hord_p, wk, heat_s, diss_e, z_rat, cr_weight)
     do k=1,npz
        hord_m = flagstruct%hord_mt
        hord_t = flagstruct%hord_tm
@@ -910,7 +919,7 @@ endif
                   flagstruct%hord_tr, hord_v, hord_t, hord_p,    &
                   nord_v(k), nord_t,  &
                   damp_vt(k), damp_t, hydrostatic, gridstruct, flagstruct, bd, &
-                  allflux_x,allflux_y,rax(is,jsd,k),ray(isd,js,k),utt(isd,jsd,k),vtt(isd,jsd,k))
+                  allflux_x,allflux_y,rax(is,jsd,k),ray(isd,js,k),utt(isd,jsd,k),vtt(isd,jsd,k),cr_weight)
 
                   !vc(isd,jsd,k), uc_old(isd,jsd,k), vc_old(isd,jsd,k), dt,  &
        call d_sw3(u(isd,jsd,k),    v(isd,jsd,k),  uc(isd,jsd,k),      &
@@ -3084,5 +3093,25 @@ do 1000 j=jfirst,jlast
 
  end subroutine gz_bc
 
+ subroutine coeffs_cr(n_split, weights)
+   ! Compute coefficients for computation of cr_rk2 and cr_rk2 
+   integer :: n_split
+   real, intent(inout) :: weights(1:n_split)
+   real :: x
+   integer :: i, j, N
+
+   N = n_split
+   x = real((N+1.0d0)*0.5d0)
+   do i = 1, N
+      weights(i)=1.d0
+      do j = 1, N
+         if (i.ne.j) then
+            weights(i) = weights(i)*real(x-j)/real(i-j)
+         endif
+      enddo
+      weights(i) =weights(i)*n_split
+   enddo
+
+end subroutine coeffs_cr
 
 end module dyn_core_mod
