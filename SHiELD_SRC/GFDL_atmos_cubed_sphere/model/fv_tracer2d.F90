@@ -111,7 +111,7 @@ contains
 ! !ROUTINE: Perform 2D horizontal-to-lagrangian transport
 !-----------------------------------------------------------------------
 
-  subroutine tracer_2d_1L(q, dp1, delp, mfx, mfy, cx, cy, cx_dp2, cy_dp2, &
+  subroutine tracer_2d_1L(q, dp1, delp, mfx, mfy, cx, cy, cx_rk2, cy_rk2, &
                           gridstruct, bd, domain, npx, npy, npz, &
                           nq, hord, q_split, dt, id_divg, q_pack, dp1_pack, nord_tr, trdm, lim_fac)
 
@@ -133,8 +133,8 @@ contains
     real, intent(INOUT) :: mfy(bd%is:bd%ie, bd%js:bd%je + 1, npz)    ! Mass Flux Y-Dir
     real, intent(INOUT) ::  cx(bd%is:bd%ie + 1, bd%jsd:bd%jed, npz)  ! Courant Number X-Dir
     real, intent(INOUT) ::  cy(bd%isd:bd%ied, bd%js:bd%je + 1, npz)  ! Courant Number Y-Dir
-    real, intent(INOUT) ::  cx_dp2(bd%is:bd%ie + 1, bd%jsd:bd%jed, npz)  ! Courant Number X-Dir
-    real, intent(INOUT) ::  cy_dp2(bd%isd:bd%ied, bd%js:bd%je + 1, npz)  ! Courant Number Y-Dir
+    real, intent(INOUT) ::  cx_rk2(bd%is:bd%ie + 1, bd%jsd:bd%jed, npz)  ! Courant Number X-Dir
+    real, intent(INOUT) ::  cy_rk2(bd%isd:bd%ied, bd%js:bd%je + 1, npz)  ! Courant Number Y-Dir
     type(fv_grid_type), intent(INOUT), target :: gridstruct
     type(domain2d), intent(INOUT) :: domain
 
@@ -159,8 +159,8 @@ contains
     real :: ra_y(bd%isd:bd%ied, bd%js:bd%je)
     real :: xfx(bd%is:bd%ie + 1, bd%jsd:bd%jed, npz)
     real :: yfx(bd%isd:bd%ied, bd%js:bd%je + 1, npz)
-    real :: xfx_dp2(bd%is:bd%ie + 1, bd%jsd:bd%jed, npz)
-    real :: yfx_dp2(bd%isd:bd%ied, bd%js:bd%je + 1, npz)
+    real :: xfx_rk2(bd%is:bd%ie + 1, bd%jsd:bd%jed, npz)
+    real :: yfx_rk2(bd%isd:bd%ied, bd%js:bd%je + 1, npz)
     real :: cmax(npz)
     real :: frac
     integer :: nsplt
@@ -203,7 +203,7 @@ contains
  
 !$OMP parallel do default(none) shared(is,ie,js,je,isd,ied,jsd,jed,npz,cx,xfx,dxa,dy, &
 !$OMP                                  adv_scheme,sin_sg,cy,yfx,dya,dx,cmax, &
-!$OMP                                  xfx_dp2,yfx_dp2,cx_dp2,cy_dp2, &
+!$OMP                                  xfx_rk2,yfx_rk2,cx_rk2,cy_rk2, &
 !$OMP                                  dxa_cs,dya_cs,dxc_cs,dyc_cs)
     do k = 1, npz
       do j = jsd, jed
@@ -228,12 +228,12 @@ contains
       if(adv_scheme==2)then
         do j = jsd, jed
           do i = is, ie + 1
-            xfx_dp2(i, j, k) = cx_dp2(i, j, k)*dxc_cs(i)*dya_cs(j)
+            xfx_rk2(i, j, k) = cx_rk2(i, j, k)*dxc_cs(i)*dya_cs(j)
           end do
         end do
         do j = js, je + 1
           do i = isd, ied
-            yfx_dp2(i, j, k) = cy_dp2(i, j, k)*dxa_cs(i)*dyc_cs(j)
+            yfx_rk2(i, j, k) = cy_rk2(i, j, k)*dxa_cs(i)*dyc_cs(j)
           end do
         end do
       endif
@@ -366,8 +366,8 @@ contains
                 q(i, j, k, iq) = dp1(i, j, k)*q(i, j, k, iq)
               end do
             end do
-            call fv_tp_2d(q(isd, jsd, k, iq), cx_dp2, cy_dp2, npx, npy, hord, fx, fy, &
-                          xfx_dp2, yfx_dp2, gridstruct, bd, ra_x, ra_y, lim_fac, &
+            call fv_tp_2d(q(isd, jsd, k, iq), cx_rk2, cy_rk2, npx, npy, hord, fx, fy, &
+                          xfx_rk2, yfx_rk2, gridstruct, bd, ra_x, ra_y, lim_fac, &
                           advscheme=adv_scheme)
 !          if (gridstruct%dg%is_initialized) then
 !            call flux_adj(fx, fy, bd, domain, npx, npy, npz)
@@ -453,7 +453,7 @@ contains
 
 
 
-subroutine tracer_2d(q, dp1, mfx, mfy, cx, cy, cx_dp2, cy_dp2, &
+subroutine tracer_2d(q, dp1, mfx, mfy, cx, cy, cx_rk2, cy_rk2, &
                      gridstruct,bd, domain, npx, npy, npz,   &
                      nq,  hord, q_split, dt, id_divg, q_pack, dp1_pack, nord_tr, trdm, lim_fac)
 
@@ -474,8 +474,8 @@ subroutine tracer_2d(q, dp1, mfx, mfy, cx, cy, cx_dp2, cy_dp2, &
       real   , intent(INOUT) :: mfy(bd%is:bd%ie  ,bd%js:bd%je+1,npz)    ! Mass Flux Y-Dir
       real   , intent(INOUT) ::  cx(bd%is:bd%ie+1,bd%jsd:bd%jed  ,npz)  ! Courant Number X-Dir
       real   , intent(INOUT) ::  cy(bd%isd:bd%ied,bd%js :bd%je +1,npz)  ! Courant Number Y-Dir
-      real   , intent(INOUT) ::  cx_dp2(bd%is:bd%ie + 1, bd%jsd:bd%jed, npz)  ! Courant Number X-Dir
-      real   , intent(INOUT) ::  cy_dp2(bd%isd:bd%ied, bd%js:bd%je + 1, npz)  ! Courant Number Y-Dir
+      real   , intent(INOUT) ::  cx_rk2(bd%is:bd%ie + 1, bd%jsd:bd%jed, npz)  ! Courant Number X-Dir
+      real   , intent(INOUT) ::  cy_rk2(bd%isd:bd%ied, bd%js:bd%je + 1, npz)  ! Courant Number Y-Dir
       type(fv_grid_type), intent(INOUT), target :: gridstruct
       type(domain2d), intent(INOUT) :: domain
 
@@ -487,8 +487,8 @@ subroutine tracer_2d(q, dp1, mfx, mfy, cx, cy, cx_dp2, cy_dp2, &
       real :: ra_y(bd%isd:bd%ied,bd%js:bd%je)
       real :: xfx(bd%is:bd%ie+1,bd%jsd:bd%jed  ,npz)
       real :: yfx(bd%isd:bd%ied,bd%js: bd%je+1, npz)
-      real :: xfx_dp2(bd%is:bd%ie + 1, bd%jsd:bd%jed, npz)
-      real :: yfx_dp2(bd%isd:bd%ied, bd%js:bd%je + 1, npz)
+      real :: xfx_rk2(bd%is:bd%ie + 1, bd%jsd:bd%jed, npz)
+      real :: yfx_rk2(bd%isd:bd%ied, bd%js:bd%je + 1, npz)
       real :: cmax(npz)
       real :: c_global
       real :: frac, rdt
@@ -534,7 +534,7 @@ subroutine tracer_2d(q, dp1, mfx, mfy, cx, cy, cx_dp2, cy_dp2, &
 
 !$OMP parallel do default(none) shared(is,ie,js,je,isd,ied,jsd,jed,npz,cx,xfx,dxa,dy, &
 !$OMP                                  adv_scheme,sin_sg,cy,yfx,dya,dx,cmax,q_split,ksplt, &
-!$OMP                                  xfx_dp2,yfx_dp2,cx_dp2,cy_dp2, &
+!$OMP                                  xfx_rk2,yfx_rk2,cx_rk2,cy_rk2, &
 !$OMP                                  dxa_cs,dya_cs,dxc_cs,dyc_cs)
     do k=1,npz
        do j=jsd,jed
@@ -559,12 +559,12 @@ subroutine tracer_2d(q, dp1, mfx, mfy, cx, cy, cx_dp2, cy_dp2, &
        if(adv_scheme==2)then
          do j = jsd, jed
            do i = is, ie + 1
-             xfx_dp2(i, j, k) = cx_dp2(i, j, k)*dxc_cs(i)*dya_cs(j)
+             xfx_rk2(i, j, k) = cx_rk2(i, j, k)*dxc_cs(i)*dya_cs(j)
            end do
          end do
          do j = js, je + 1
            do i = isd, ied
-             yfx_dp2(i, j, k) = cy_dp2(i, j, k)*dxa_cs(i)*dyc_cs(j)
+             yfx_rk2(i, j, k) = cy_rk2(i, j, k)*dxa_cs(i)*dyc_cs(j)
            end do
          end do
        endif

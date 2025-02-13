@@ -1615,8 +1615,8 @@ end type duogrid_type
 ! Accumulated Courant number arrays
     real, _ALLOCATABLE ::  cx(:,:,:)  _NULL
     real, _ALLOCATABLE ::  cy(:,:,:)  _NULL
-    real, _ALLOCATABLE ::  cx_dp2(:,:,:)  _NULL
-    real, _ALLOCATABLE ::  cy_dp2(:,:,:)  _NULL
+    real, _ALLOCATABLE ::  cx_rk2(:,:,:)  _NULL
+    real, _ALLOCATABLE ::  cy_rk2(:,:,:)  _NULL
 
 
     type(fv_flags_type) :: flagstruct
@@ -1854,8 +1854,8 @@ contains
     allocate ( Atm%mfy(is:ie  , js:je+1,npz) )
     allocate (  Atm%cx(is:ie+1, jsd:jed, npz) )
     allocate (  Atm%cy(isd:ied ,js:je+1, npz) )
-    allocate (  Atm%cx_dp2(is:ie+1, jsd:jed, npz) )
-    allocate (  Atm%cy_dp2(isd:ied ,js:je+1, npz) )
+    allocate (  Atm%cx_rk2(is:ie+1, jsd:jed, npz) )
+    allocate (  Atm%cy_rk2(isd:ied ,js:je+1, npz) )
 
 
     allocate (  Atm%ak(npz_2d+1) )
@@ -2343,8 +2343,8 @@ contains
     deallocate ( Atm%mfy )
     deallocate (  Atm%cx )
     deallocate (  Atm%cy )
-    deallocate (  Atm%cx_dp2 )
-    deallocate (  Atm%cy_dp2 )
+    deallocate (  Atm%cx_rk2 )
+    deallocate (  Atm%cy_rk2 )
     deallocate (  Atm%ak )
     deallocate (  Atm%bk )
     deallocate ( Atm%diss_est )

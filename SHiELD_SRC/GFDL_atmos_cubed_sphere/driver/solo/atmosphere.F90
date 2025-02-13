@@ -274,7 +274,7 @@ contains
                      Atm(n)%forcing_uc, Atm(n)%forcing_vc, Atm(n)%forcing_ud, Atm(n)%forcing_vd, &
                      Atm(n)%forcing_delp, &
                      Atm(n)%ak, Atm(n)%bk, Atm(n)%mfx, Atm(n)%mfy,                    &
-                     Atm(n)%cx, Atm(n)%cy, Atm(n)%cx_dp2, Atm(n)%cy_dp2, Atm(n)%ze0, Atm(n)%flagstruct%hybrid_z,    &
+                     Atm(n)%cx, Atm(n)%cy, Atm(n)%cx_rk2, Atm(n)%cy_rk2, Atm(n)%ze0, Atm(n)%flagstruct%hybrid_z,    &
                      Atm(n)%gridstruct, Atm(n)%flagstruct,                            &
                      Atm(n)%neststruct, Atm(n)%idiag, Atm(n)%bd, Atm(n)%parent_grid,  &
                      Atm(n)%domain, Atm(n)%inline_mp, Atm(n)%diss_est)
@@ -290,7 +290,7 @@ contains
                      Atm(n)%forcing_uc, Atm(n)%forcing_vc, Atm(n)%forcing_ud, Atm(n)%forcing_vd, &
                      Atm(n)%forcing_delp, &
                      Atm(n)%ak, Atm(n)%bk, Atm(n)%mfx, Atm(n)%mfy,                    &
-                     Atm(n)%cx, Atm(n)%cy, Atm(n)%cx_dp2, Atm(n)%cy_dp2, Atm(n)%ze0, Atm(n)%flagstruct%hybrid_z,    &
+                     Atm(n)%cx, Atm(n)%cy, Atm(n)%cx_rk2, Atm(n)%cy_rk2, Atm(n)%ze0, Atm(n)%flagstruct%hybrid_z,    &
                      Atm(n)%gridstruct, Atm(n)%flagstruct,                            &
                      Atm(n)%neststruct, Atm(n)%idiag, Atm(n)%bd, Atm(n)%parent_grid,  &
                      Atm(n)%domain, Atm(n)%inline_mp, Atm(n)%diss_est)
@@ -339,7 +339,7 @@ contains
                      Atm(n)%forcing_uc, Atm(n)%forcing_vc, Atm(n)%forcing_ud, Atm(n)%forcing_vd, &
                      Atm(n)%forcing_delp, &
                      Atm(n)%ak, Atm(n)%bk, Atm(n)%mfx, Atm(n)%mfy,                    &
-                     Atm(n)%cx, Atm(n)%cy, Atm(n)%cx_dp2, Atm(n)%cy_dp2, Atm(n)%ze0, Atm(n)%flagstruct%hybrid_z,    &
+                     Atm(n)%cx, Atm(n)%cy, Atm(n)%cx_rk2, Atm(n)%cy_rk2, Atm(n)%ze0, Atm(n)%flagstruct%hybrid_z,    &
                      Atm(n)%gridstruct, Atm(n)%flagstruct,                            &
                      Atm(n)%neststruct, Atm(n)%idiag, Atm(n)%bd, Atm(n)%parent_grid,  &
                      Atm(n)%domain, Atm(n)%inline_mp, Atm(n)%diss_est)
@@ -355,7 +355,7 @@ contains
                      Atm(n)%forcing_uc, Atm(n)%forcing_vc, Atm(n)%forcing_ud, Atm(n)%forcing_vd, &
                      Atm(n)%forcing_delp, &
                      Atm(n)%ak, Atm(n)%bk, Atm(n)%mfx, Atm(n)%mfy,                    &
-                     Atm(n)%cx, Atm(n)%cy, Atm(n)%cx_dp2, Atm(n)%cy_dp2, Atm(n)%ze0, Atm(n)%flagstruct%hybrid_z,    &
+                     Atm(n)%cx, Atm(n)%cy, Atm(n)%cx_rk2, Atm(n)%cy_rk2, Atm(n)%ze0, Atm(n)%flagstruct%hybrid_z,    &
                      Atm(n)%gridstruct, Atm(n)%flagstruct,                            &
                      Atm(n)%neststruct, Atm(n)%idiag, Atm(n)%bd, Atm(n)%parent_grid,  &
                      Atm(n)%domain, Atm(n)%inline_mp, Atm(n)%diss_est)
@@ -455,7 +455,7 @@ contains
             Atm(n)%phis, Atm(n)%q_con, Atm(n)%omga, Atm(n)%ua, Atm(n)%va, Atm(n)%uc, Atm(n)%vc, Atm(n)%uc_old, Atm(n)%vc_old,  &
             Atm(n)%forcing_uc, Atm(n)%forcing_vc, Atm(n)%forcing_ud, Atm(n)%forcing_vd, &
             Atm(n)%forcing_delp, &
-            Atm(n)%ak, Atm(n)%bk, Atm(n)%mfx, Atm(n)%mfy, Atm(n)%cx, Atm(n)%cy, Atm(n)%cx_dp2, Atm(n)%cy_dp2,    &
+            Atm(n)%ak, Atm(n)%bk, Atm(n)%mfx, Atm(n)%mfy, Atm(n)%cx, Atm(n)%cy, Atm(n)%cx_rk2, Atm(n)%cy_rk2,    &
             Atm(n)%ze0, Atm(n)%flagstruct%hybrid_z, Atm(n)%gridstruct, Atm(n)%flagstruct, &
             Atm(n)%neststruct, Atm(n)%idiag, Atm(n)%bd, Atm(n)%parent_grid, Atm(n)%domain, &
             Atm(n)%inline_mp, Atm(n)%diss_est, time_total=time_total)

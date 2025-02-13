@@ -502,9 +502,9 @@ endif
 !     d_sw :: D-Grid Shallow Water Routine
 
    subroutine d_sw1( delp, pt, w, uc,vc, uc_old,vc_old, &
-                    xflux, yflux, cx, cy, cx_dp2, cy_dp2, &
+                    xflux, yflux, cx, cy, cx_rk2, cy_rk2, &
                    crx_adv, cry_adv,  xfx_adv, yfx_adv,   &
-                   crx_dp2, cry_dp2,  xfx_dp2, yfx_dp2, q_con,     &
+                   crx_rk2, cry_rk2,  xfx_rk2, yfx_rk2, q_con,     &
                     nq, q, k, km, inline_q,  &
                    dt, hord_tr, hord_vt, hord_tm, hord_dp,   &
                    nord_v, nord_t, damp_v, &
@@ -530,14 +530,14 @@ endif
 !------------------------
       real, intent(INOUT)::    cx(bd%is:bd%ie+1,bd%jsd:bd%jed  )
       real, intent(INOUT)::    cy(bd%isd:bd%ied,bd%js:bd%je+1)
-      real, intent(INOUT)::    cx_dp2(bd%is:bd%ie+1,bd%jsd:bd%jed  )
-      real, intent(INOUT)::    cy_dp2(bd%isd:bd%ied,bd%js:bd%je+1)
+      real, intent(INOUT)::    cx_rk2(bd%is:bd%ie+1,bd%jsd:bd%jed  )
+      real, intent(INOUT)::    cy_rk2(bd%isd:bd%ied,bd%js:bd%je+1)
       logical, intent(IN):: hydrostatic
       logical, intent(IN):: inline_q
       real, intent(OUT), dimension(bd%is:bd%ie+1,bd%jsd:bd%jed):: crx_adv, xfx_adv
       real, intent(OUT), dimension(bd%isd:bd%ied,bd%js:bd%je+1):: cry_adv, yfx_adv
-      real, intent(OUT), dimension(bd%is:bd%ie+1,bd%jsd:bd%jed):: crx_dp2, xfx_dp2
-      real, intent(OUT), dimension(bd%isd:bd%ied,bd%js:bd%je+1):: cry_dp2, yfx_dp2
+      real, intent(OUT), dimension(bd%is:bd%ie+1,bd%jsd:bd%jed):: crx_rk2, xfx_rk2
+      real, intent(OUT), dimension(bd%isd:bd%ied,bd%js:bd%je+1):: cry_rk2, yfx_rk2
       real,intent(out) ::   allflux_x(bd%is:bd%ie+1,bd%js:bd%je,km,4+nq  )  ! 1-D X-direction Fluxes
       real,intent(out) ::   allflux_y(bd%is:bd%ie  ,bd%js:bd%je+1,km,4+nq)  ! 1-D Y-direction Fluxes
       real,intent(out) :: ra_x(bd%is:bd%ie,bd%jsd:bd%jed)
@@ -628,9 +628,9 @@ endif
         enddo
 
        if(gridstruct%adv_scheme==2) then
-           call departure_cfl_rk2(gridstruct, flagstruct, bd, crx_dp2, cry_dp2, &
+           call departure_cfl_rk2(gridstruct, flagstruct, bd, crx_rk2, cry_rk2, &
                              uc_old, vc_old, uc, vc, dt)
-           call compute_xfx_yfx_rk2(gridstruct, flagstruct, bd, crx_dp2, cry_dp2, xfx_dp2, yfx_dp2)
+           call compute_xfx_yfx_rk2(gridstruct, flagstruct, bd, crx_rk2, cry_rk2, xfx_rk2, yfx_rk2)
        endif 
 
       else
@@ -890,9 +890,9 @@ endif
 
         if(gridstruct%adv_scheme==2) then
            call compute_ut_vt( uc_old, vc_old, ut_old, vt_old, dt, gridstruct, flagstruct, bd)
-           call departure_cfl_rk2(gridstruct, flagstruct, bd, crx_dp2, cry_dp2, &
+           call departure_cfl_rk2(gridstruct, flagstruct, bd, crx_rk2, cry_rk2, &
                              ut_old, vt_old, ut, vt, dt)
-           call compute_xfx_yfx_rk2(gridstruct, flagstruct, bd, crx_dp2, cry_dp2, xfx_dp2, yfx_dp2)
+           call compute_xfx_yfx_rk2(gridstruct, flagstruct, bd, crx_rk2, cry_rk2, xfx_rk2, yfx_rk2)
         endif
 
 #ifdef SW_DYNAMICS
@@ -914,8 +914,8 @@ endif
          call fv_tp_2d(delp, crx_adv, cry_adv, npx, npy, hord_dp, fx, fy,  &
                    xfx_adv,yfx_adv, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac, nord=nord_v, damp_c=damp_v)
       else if(gridstruct%adv_scheme==2) then
-         call fv_tp_2d(delp, crx_dp2, cry_dp2, npx, npy, hord_dp, fx, fy,  &
-                    xfx_dp2,yfx_dp2, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac, nord=nord_v, damp_c=damp_v, &
+         call fv_tp_2d(delp, crx_rk2, cry_rk2, npx, npy, hord_dp, fx, fy,  &
+                    xfx_rk2,yfx_rk2, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac, nord=nord_v, damp_c=damp_v, &
                     advscheme=gridstruct%adv_scheme)
       endif
 
@@ -954,12 +954,12 @@ endif
         if(gridstruct%adv_scheme==2)then
            do j=jsd,jed
                do i=is,ie+1
-                 cx_dp2(i,j) = cx_dp2(i,j) + lt2_weight*crx_dp2(i,j)
+                 cx_rk2(i,j) = cx_rk2(i,j) + lt2_weight*crx_rk2(i,j)
               enddo
            enddo
            do j=js,je+1
               do i=isd,ied
-                 cy_dp2(i,j) = cy_dp2(i,j) + lt2_weight*cry_dp2(i,j)
+                 cy_rk2(i,j) = cy_rk2(i,j) + lt2_weight*cry_rk2(i,j)
               enddo
            enddo
         endif
@@ -975,7 +975,7 @@ endif
                  w(i,j) = delp(i,j)*w(i,j)
               enddo
            enddo
-           call fv_tp_2d(w, crx_dp2,cry_dp2, npx, npy, hord_vt, gx, gy, xfx_dp2, yfx_dp2, &
+           call fv_tp_2d(w, crx_rk2,cry_rk2, npx, npy, hord_vt, gx, gy, xfx_rk2, yfx_rk2, &
                          gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac, &
                          advscheme=flagstruct%adv_scheme)
                          !nord=nord_v, damp_c=damp_v, advscheme=flagstruct%adv_scheme)
@@ -1028,8 +1028,8 @@ endif
                  pt(i,j) = delp(i,j)*pt(i,j)
               enddo
            enddo
-           call fv_tp_2d(pt, crx_dp2,cry_dp2, npx, npy, hord_tm, gx, gy,  &
-                         xfx_dp2,yfx_dp2, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac, &
+           call fv_tp_2d(pt, crx_rk2,cry_rk2, npx, npy, hord_tm, gx, gy,  &
+                         xfx_rk2,yfx_rk2, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac, &
                          nord=nord_v, damp_c=damp_v, advscheme=flagstruct%adv_scheme)
         endif
 
@@ -1061,8 +1061,8 @@ endif
                call fv_tp_2d(q(isd,jsd,k,iq), crx_adv, cry_adv, npx, npy, hord_tr, gx, gy, &
                            xfx_adv, yfx_adv, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac)
             else if(gridstruct%adv_scheme==2) then
-               call fv_tp_2d(q(isd,jsd,k,iq), crx_dp2, cry_dp2, npx, npy, hord_tr, gx, gy, &
-                           xfx_dp2, yfx_dp2, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac, &
+               call fv_tp_2d(q(isd,jsd,k,iq), crx_rk2, cry_rk2, npx, npy, hord_tr, gx, gy, &
+                           xfx_rk2, yfx_rk2, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac, &
                            advscheme=gridstruct%adv_scheme)
             endif
          endif
@@ -1777,7 +1777,7 @@ endif
    subroutine d_sw5(delpc, delp,  ptc, u,  v, w, uc,vc, &
                    ua, va, divg_d,              &
                    crx_adv, cry_adv,  xfx_adv, yfx_adv,  &
-                   crx_dp2, cry_dp2,  xfx_dp2, yfx_dp2, q_con, z_rat,     &
+                   crx_rk2, cry_rk2,  xfx_rk2, yfx_rk2, q_con, z_rat,     &
                    dt, hord_vt, nord,   &
                     dddmp, d2_bg, d4_bg, damp_w, &
                     d_con, hydrostatic, gridstruct, flagstruct, bd,  &
@@ -1799,8 +1799,8 @@ endif
       logical, intent(IN):: hydrostatic
       real, intent(OUT), dimension(bd%is:bd%ie+1,bd%jsd:bd%jed):: crx_adv, xfx_adv
       real, intent(OUT), dimension(bd%isd:bd%ied,bd%js:bd%je+1):: cry_adv, yfx_adv
-      real, intent(OUT), dimension(bd%is:bd%ie+1,bd%jsd:bd%jed):: crx_dp2, xfx_dp2
-      real, intent(OUT), dimension(bd%isd:bd%ied,bd%js:bd%je+1):: cry_dp2, yfx_dp2
+      real, intent(OUT), dimension(bd%is:bd%ie+1,bd%jsd:bd%jed):: crx_rk2, xfx_rk2
+      real, intent(OUT), dimension(bd%isd:bd%ied,bd%js:bd%je+1):: cry_rk2, yfx_rk2
 
 
       real,intent(out) ::   vortfluxx(bd%is:bd%ie+1,bd%js:bd%je  )  ! 1-D X-direction Fluxes
@@ -2169,8 +2169,8 @@ endif
    else if(gridstruct%adv_scheme==2) then
       !call fv_tp_2d(vort, crx_adv, cry_adv, npx, npy, hord_vt, vortfluxx, vortfluxy, &
       !            xfx_adv,yfx_adv, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac)
-      call fv_tp_2d(vort, crx_dp2, cry_dp2, npx, npy, hord_vt, vortfluxx, vortfluxy, &
-                    xfx_dp2,yfx_dp2, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac, &
+      call fv_tp_2d(vort, crx_rk2, cry_rk2, npx, npy, hord_vt, vortfluxx, vortfluxy, &
+                    xfx_rk2,yfx_rk2, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac, &
                     advscheme=gridstruct%adv_scheme)
    endif
 
