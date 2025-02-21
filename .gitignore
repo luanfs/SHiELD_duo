@@ -9,3 +9,4 @@ SHiELD_SRC/GFDL_atmos_cubed_sphere/tools/*.swp
 *pycache__/
 *.out
 *stdout
+*.ipynb_checkpoints
