@@ -31,13 +31,13 @@ set SCRIPT_AREA = /ncrc/home2/Luan.Santos/SHiELD_duo/SHiELD_build
 
 ##################################################################################
 # Simulation parameters
-set adv=2             # 1-Putman and Lin 2007 scheme; 2-LT2
+set adv=1             # 1-Putman and Lin 2007 scheme; 2-LT2
 set dg=1              # duogrid (always 1)
 set gtype=0           # grid type(0-equiedge; 2-equiangular)
 set hord=5            # PPM scheme
 set N=48              # N
 set N=96              # N
-set N=192             # N
+#set N=192             # N
 #set N=384             # N
 set npz="32"
 
@@ -47,13 +47,13 @@ set TYPE="hydro"           # choices:  nh, hydro
 set Tf="15"
 set dt_atmos="1920"    # atmos time step
 set dt_atmos="960"    # atmos time step
-set dt_atmos="480"     # atmos time step
+#set dt_atmos="480"     # atmos time step
 #set dt_atmos="240"     # atmos time step
 set n_split="8"
 set dgflag=".true."
 set test_case="-13"
 set testname="bi"
-set layout=10
+set layout=5
 ##################################################################################
 
 # set divergence/vorticity damping coefficient
@@ -62,8 +62,8 @@ if ($hord == "5") then
       set div_damp=0.12
       set vort_damp=0.12
    else
-      set div_damp=0.14
-      set vort_damp=0.14
+      set div_damp=0.12
+      set vort_damp=0.12
    endif
 else if ($hord == "6") then
    if ($adv == "1") then
@@ -316,7 +316,6 @@ cat > input.nml <<EOF
        d4_bg = $div_damp
        vtdm4 = $vort_damp
        do_vort_damp = $do_vort_damp
-
        layout   = $layout_x,$layout_y
        io_layout = $io_layout
        npx      = $npx
@@ -368,8 +367,8 @@ cat > input.nml <<EOF
        hord_tr = $hord
        adjust_dry_mass = .F.
        consv_te = 0.0
-       do_sat_adj = .F.
-       do_inline_mp = .F.
+       !do_sat_adj = .F.
+       !do_inline_mp = .F.
        consv_am = .F.
        fill = .F.
        dwind_2d = .F.
@@ -377,12 +376,15 @@ cat > input.nml <<EOF
        fill_dp = .F. 
        print_freq = 12
        warm_start = .F.
-       do_schmidt = .false.
-       target_lon = 0. !XI
        adiabatic = .true.
        duogrid    = $dgflag
        duogrid_scheme = $dg
        adv_scheme = $adv
+       !do_schmidt = .true.
+       !target_lat = -135.0
+       !target_lat = 0
+       !target_lon = 0
+       !stretch_fac =1.0
 /
 
 

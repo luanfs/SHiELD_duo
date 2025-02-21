@@ -24,13 +24,27 @@ graphdir = '/gpfs/f5/scratch/Luan.Santos/gfdl_w/graphs_solo_'+hydro+'/'
 N=128
 Tf=1
 gtype = 0
-hords = (5,)
+hords = (8,)
 advs  = (1,2)
 dds = (0.12,0.15)
 vds = (0.12,0.12)
 testname='modons3d'
-dg='dg1'
-basename= "C"+str(N)+"."+hydro+"."+testname+".g"+str(gtype)+"."+str(dg)
+#dg='dg1'
+dg1=1
+dg2=1
+
+if dg1==1:
+    dg1='.dg1'
+else:
+   dg1='.kinked'
+
+if dg2==1:
+    dg2='.dg1'
+else:
+   dg2='.kinked'
+
+dgs=(dg1,dg2)
+basename= "C"+str(N)+"."+hydro+"."+testname+".g"+str(gtype)#+".dg"#+str(dg)
 #----------------------------------------------------------------------------------------------
 
 
@@ -127,8 +141,9 @@ elif gtype==2:
 filepaths = []
 for hord in hords: 
     datas = []
-    for adv, dd, vd in zip(advs, dds, vds):
-        filepath = datadir+basename+'.adv'+str(adv)+'.hord'+str(hord)+'.dd'+str(dd)+'.vd'+str(vd)+"/rundir/"
+    for adv, dd, vd, dg in zip(advs, dds, vds, dgs):
+        #filepath = datadir+basename+'.adv'+str(adv)+'.hord'+str(hord)+'.dd'+str(dd)+'.vd'+str(vd)+"/rundir/"
+        filepath = datadir+basename+str(dg)+'.adv'+str(adv)+'.hord'+str(hord)+"/rundir/"
         print(filepath)
         filepaths.append(filepath)
 
@@ -204,14 +219,14 @@ for t in range(0,nplots+1,tgap):
 
     adv=1
     field='h'
-    title = field+'_'+testname+'_t'+str(t)+'_'+basename+'.adv'+str(adv)+'.hord'+str(hord)
+    title = field+'_'+testname+'_t'+str(t)+'_'+basename+str(dg1)+'.adv'+str(adv)+'.hord'+str(hord)
     filename = graphdir+title
     title = 'PL07\n'+title
     #plot_scalarfield(field_adv1, title, filename, filepaths[0], 'jet', fmin, fmax)
 
     adv=2
     field='h'
-    title = field+'_'+testname+'_t'+str(t)+'_'+basename+'.adv'+str(adv)+'.hord'+str(hord)
+    title = field+'_'+testname+'_t'+str(t)+'_'+basename+str(dg2)+'.adv'+str(adv)+'.hord'+str(hord)
     filename = graphdir+title
     title = 'LT2\n'+title
     #plot_scalarfield(field_adv2, title, filename, filepaths[0], 'jet', fmin, fmax)
@@ -237,14 +252,14 @@ for t in range(0,nplots+1,tgap):
 
     adv=1
     field='u'
-    title = field+'_'+testname+'_t'+str(t)+'_'+basename+'.adv'+str(adv)+'.hord'+str(hord)
+    title = field+'_'+testname+'_t'+str(t)+'_'+basename+str(dg1)+'.adv'+str(adv)+'.hord'+str(hord)
     filename = graphdir+title
     title = 'PL07\n'+title
     plot_scalarfield(field_adv1, title, filename, filepaths[0], 'seismic', fmin, fmax)
 
     adv=2
     field='u'
-    title = field+'_'+testname+'_t'+str(t)+'_'+basename+'.adv'+str(adv)+'.hord'+str(hord)
+    title = field+'_'+testname+'_t'+str(t)+'_'+basename+str(dg2)+'.adv'+str(adv)+'.hord'+str(hord)
     filename = graphdir+title
     title = 'LT2\n'+title
     plot_scalarfield(field_adv2, title, filename, filepaths[0], 'seismic', fmin, fmax)
@@ -266,14 +281,14 @@ for t in range(0,nplots+1,tgap):
 
     adv=1
     field='v'
-    title = field+'_'+testname+'_t'+str(t)+'_'+basename+'.adv'+str(adv)+'.hord'+str(hord)
+    title = field+'_'+testname+'_t'+str(t)+'_'+basename+str(dg1)+'.adv'+str(adv)+'.hord'+str(hord)
     filename = graphdir+title
     title = 'PL07\n'+title
     #plot_scalarfield(field_adv1, title, filename, filepaths[0], 'viridis', fmin, fmax)
 
     adv=2
     field='v'
-    title = field+'_'+testname+'_t'+str(t)+'_'+basename+'.adv'+str(adv)+'.hord'+str(hord)
+    title = field+'_'+testname+'_t'+str(t)+'_'+basename+str(dg2)+'.adv'+str(adv)+'.hord'+str(hord)
     filename = graphdir+title
     title = 'LT2\n'+title
     #plot_scalarfield(field_adv2, title, filename, filepaths[0], 'viridis', fmin, fmax)
@@ -299,16 +314,18 @@ for t in range(0,nplots+1,tgap):
 
     adv=1
     field='vort'
-    title = field+'_'+testname+'_t'+str(t)+'_'+basename+'.adv'+str(adv)+'.hord'+str(hord)
+    title = field+'_'+testname+'_t'+str(t)+'_'+basename+str(dg1)+'.adv'+str(adv)+'.hord'+str(hord)
     filename = graphdir+title
-    title = 'PL07\n'+title
+    #title = 'PL07\n'+title
+    title = 'PL07 - kinked\n'+title
     plot_scalarfield(field_adv1, title, filename, filepaths[0], 'seismic', fmin, fmax)
 
     adv=2
     field='vort'
-    title = field+'_'+testname+'_t'+str(t)+'_'+basename+'.adv'+str(adv)+'.hord'+str(hord)
+    title = field+'_'+testname+'_t'+str(t)+'_'+basename+str(dg2)+'.adv'+str(adv)+'.hord'+str(hord)
     filename = graphdir+title
     title = 'LT2\n'+title
+    #title = 'LT2 - duogrid\n'+title
     plot_scalarfield(field_adv2, title, filename, filepaths[0], 'seismic', fmin, fmax)
     ##############################################################################################
 
@@ -326,14 +343,14 @@ for t in range(0,nplots+1,tgap):
 
     adv=1
     field='pv'
-    title = field+'_'+testname+'_t'+str(t)+'_'+basename+'.adv'+str(adv)+'.hord'+str(hord)
+    title = field+'_'+testname+'_t'+str(t)+'_'+basename+str(dg1)+'.adv'+str(adv)+'.hord'+str(hord)
     filename = graphdir+title
     title = 'PL07\n'+title
     #plot_scalarfield(field_adv1, title, filename, filepaths[0], 'seismic', fmin, fmax)
 
     adv=2
     field='pv'
-    title = field+'_'+testname+'_t'+str(t)+'_'+basename+'.adv'+str(adv)+'.hord'+str(hord)
+    title = field+'_'+testname+'_t'+str(t)+'_'+basename+str(dg2)+'.adv'+str(adv)+'.hord'+str(hord)
     filename = graphdir+title
     title = 'LT2\n'+title
     #plot_scalarfield(field_adv2, title, filename, filepaths[0], 'seismic', fmin, fmax)

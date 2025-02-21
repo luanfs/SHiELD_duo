@@ -9,7 +9,7 @@ from matplotlib import ticker, cm, colors, colorbar
 #----------------------------------------------------------------------------------------------
 # directories
 hydro="nh"
-#hydro="hydro"
+hydro="hydro"
 #datadir='/scratch/cimes/ls9640/solo_'+hydro+'/'
 #graphdir = '/scratch/cimes/ls9640/graphs_solo_'+hydro+'/'
 
@@ -21,7 +21,8 @@ graphdir = '/gpfs/f5/scratch/Luan.Santos/gfdl_w/graphs_solo_'+hydro+'/'
 
 #----------------------------------------------------------------------------------------------
 #simulation parameters
-N=128
+N=96
+#N=256
 Tf=1
 gtype = 0
 hords = (5,)
@@ -135,8 +136,6 @@ data = xr.open_dataset(atmos_file, decode_times=False)
 times = data.time.values
 nplots = len(times)
 dtplot = times[1]-times[0]
-#npz = np.shape(data['pfull'][:])[0]
-npz = 1
 
 #-----------------------------------------------------------------------------------------
 # Arrays to store the data that will be plotted
@@ -146,54 +145,34 @@ u = np.zeros((N,N,6,nplots+1,len(advs)))
 v = np.zeros((N,N,6,nplots+1,len(advs)))
 vort = np.zeros((N,N,6,nplots+1,len(advs)))
 pv = np.zeros((N,N,6,nplots+1,len(advs)))
+v = np.zeros((N,N,6,nplots+1,len(advs)))
+pwat = np.zeros((N,N,6,nplots+1,len(advs)))
 
-
-
-# This loop over tiles computes the maximum errors
 time = 0  
 tgap=1
 #nplots = 100
 #exit()
-for t in range(0,nplots+1,tgap):
-    print(t)
-    for k, filepath in enumerate(filepaths):
-        for tile in range(0,6):
-            print(time, k, filepath, tile)
-            # Files to be opened
-            atmos_file = filepath+"atmos_4xdaily.tile"+str(tile+1)+".nc"
-            grid_file  = filepath+"grid_spec.tile"+str(tile+1)+".nc"
+for k, filepath in enumerate(filepaths):
+   for tile in range(0,6):
+      print(time, k, filepath, tile)
+      # Files to be opened
+      atmos_file = filepath+"atmos_4xdaily.tile"+str(tile+1)+".nc"
+      grid_file  = filepath+"grid_spec.tile"+str(tile+1)+".nc"
 
-            # Load the files
-            data = xr.open_dataset(atmos_file, decode_times=False)
-            grid = xr.open_dataset(grid_file , decode_times=False)
-            #for d in data.keys():
-            #   print(d)
-            #exit()
-            #print(np.shape(data['UGRD500'].values))
+      # Load the files
+      data = xr.open_dataset(atmos_file, decode_times=False)
+      grid = xr.open_dataset(grid_file , decode_times=False)
+      #for d in data.keys():
+      #   print(d, np.shape(data[str(d)]))
+      #exit()
 
+      for t in range(0,nplots+1,tgap):
+         if t>=1:
+            u[:,:,tile,t,k] = data['u850'][t-1,:,:].values
+            v[:,:,tile,t,k] = data['v850'][t-1,:,:].values
+            vort[:,:,tile,t,k] = data['vort850'][t-1,:,:].values
+            pwat[:,:,tile,t,k] = data['PWAT'][t-1,:,:].values
 
-            # Variable to be plotted (ps = fluid depth in the SW model)
-            if t>=1:
-            #   h[:,:,tile,t,k] = data['ps'][t-1,:,:].values
-            #   u[:,:,tile,t,k] = data['ucomp'][t-1,:,:].values
-            #   v[:,:,tile,t,k] = data['vcomp'][t-1,:,:].values
-            #   vort[:,:,tile,t,k] = data['vort'][t-1,:,:].values
-            #   pv[:,:,tile,t,k] = data['pv'][t-1,:,:].values
-                u[:,:,tile,t,k] = data['u850'][t-1,:,:].values
-                v[:,:,tile,t,k] = data['v850'][t-1,:,:].values
-                vort[:,:,tile,t,k] = data['vort850'][t-1,:,:].values
-            #   pv[:,:,tile,t,k] = data['pv'][t-1,:,:].values
-            else: #get ic
-                print('hi')
-
-            #   h[:,:,tile,t,k] = data['ps_ic'][:,:].values
-            #   u[:,:,tile,t,k] = data['ua_ic'][:,:].values
-            #   v[:,:,tile,t,k] = data['va_ic'][:,:].values
-
-
-    # time update
-    time = time + tgap*dtplot 
-#exit()
 
 # plot
 time = 0  
@@ -247,14 +226,14 @@ for t in range(0,nplots+1,tgap):
     title = field+'_'+testname+'_t'+str(t)+'_'+basename+'.adv'+str(adv)+'.hord'+str(hord)
     filename = graphdir+title
     title = 'PL07\n'+title
-    plot_scalarfield(field_adv1, title, filename, filepaths[0], 'seismic', fmin, fmax)
+    #plot_scalarfield(field_adv1, title, filename, filepaths[0], 'seismic', fmin, fmax)
 
     adv=2
     field='u'
     title = field+'_'+testname+'_t'+str(t)+'_'+basename+'.adv'+str(adv)+'.hord'+str(hord)
     filename = graphdir+title
     title = 'LT2\n'+title
-    plot_scalarfield(field_adv2, title, filename, filepaths[0], 'seismic', fmin, fmax)
+    #plot_scalarfield(field_adv2, title, filename, filepaths[0], 'seismic', fmin, fmax)
 
     udiff = (field_adv1-field_adv2)#/(field_adv1+fref)
     dif_u[t] = np.amax(abs(udiff))/np.amax(abs(field_adv1+fref))
@@ -276,14 +255,14 @@ for t in range(0,nplots+1,tgap):
     title = field+'_'+testname+'_t'+str(t)+'_'+basename+'.adv'+str(adv)+'.hord'+str(hord)
     filename = graphdir+title
     title = 'PL07\n'+title
-    plot_scalarfield(field_adv1, title, filename, filepaths[0], 'viridis', fmin, fmax)
+    #plot_scalarfield(field_adv1, title, filename, filepaths[0], 'viridis', fmin, fmax)
 
     adv=2
     field='v'
     title = field+'_'+testname+'_t'+str(t)+'_'+basename+'.adv'+str(adv)+'.hord'+str(hord)
     filename = graphdir+title
     title = 'LT2\n'+title
-    plot_scalarfield(field_adv2, title, filename, filepaths[0], 'viridis', fmin, fmax)
+    #plot_scalarfield(field_adv2, title, filename, filepaths[0], 'viridis', fmin, fmax)
 
     #vdiff = (field_adv1-field_adv2)#/(field_adv1+fref)
     #dif_v[t] = np.amax(abs(vdiff))/np.amax(abs(field_adv1+fref))
@@ -330,7 +309,6 @@ for t in range(0,nplots+1,tgap):
     fabs = max(abs(fmin),abs(fmax))
     fmin, fmax = -fabs, fabs
 
-
     adv=1
     field='pv'
     title = field+'_'+testname+'_t'+str(t)+'_'+basename+'.adv'+str(adv)+'.hord'+str(hord)
@@ -344,6 +322,29 @@ for t in range(0,nplots+1,tgap):
     filename = graphdir+title
     title = 'LT2\n'+title
     #plot_scalarfield(field_adv2, title, filename, filepaths[0], 'seismic', fmin, fmax)
+
+    ###################################################
+    field_adv1 = pwat[:,:,:,t,0]
+    field_adv2 = pwat[:,:,:,t,1]
+
+    fmin = min(np.amin(field_adv1), np.amin(field_adv2))
+    fmax = max(np.amax(field_adv1), np.amax(field_adv2))
+
+    adv=1
+    field='pwat'
+    title = field+'_'+testname+'_t'+str(t)+'_'+basename+'.adv'+str(adv)+'.hord'+str(hord)
+    filename = graphdir+title
+    title = 'PL07\n'+title
+    plot_scalarfield(field_adv1, title, filename, filepaths[0], 'seismic', fmin, fmax)
+
+    adv=2
+    field='pwat'
+    title = field+'_'+testname+'_t'+str(t)+'_'+basename+'.adv'+str(adv)+'.hord'+str(hord)
+    filename = graphdir+title
+    title = 'LT2\n'+title
+    plot_scalarfield(field_adv1, title, filename, filepaths[0], 'seismic', fmin, fmax)
+
+
     ##############################################################################################
 
 

@@ -5,13 +5,14 @@
 #SBATCH --partition=batch
 #SBATCH --qos=urgent
 #SBATCH --account=gfdl_w
-#SBATCH --time=1:00:00
+#SBATCH --time=4:00:00
 #SBATCH --cluster=c5
 #SBATCH --ntasks=1000
 
 set BUILD_AREA = "/ncrc/home2/Luan.Santos/SHiELD_duo/SHiELD_build" 
 set SCRATCHROOT = "/gpfs/f5/gfdl_w/scratch/Luan.Santos"
 set SCRIPT_AREA = /ncrc/home2/Luan.Santos/SHiELD_duo/SHiELD_build
+source ${BUILD_AREA}/site/environment.intel.sh
 
 # Stellar
 ##SBATCH --output=/home/ls9640/SHiELD_duo/scripts/run/stdout/%x.o%j
@@ -31,28 +32,32 @@ set SCRIPT_AREA = /ncrc/home2/Luan.Santos/SHiELD_duo/SHiELD_build
 
 ##################################################################################
 # Simulation parameters
-set adv=2             # 1-Putman and Lin 2007 scheme; 2-LT2
+set adv=1             # 1-Putman and Lin 2007 scheme; 2-LT2
 set dg=1              # duogrid (always 1)
 set hord=5            # PPM scheme
-set N=128             # N
+set N=96              # N
+#set N=192             # N
+#set N=384             # N
 set npz="63"
 set gtype=0
 
 #set TYPE="nh"           # choices:  nh, hydro
 set TYPE="hydro"           # choices:  nh, hydro
 
-set Tf="5"
-set dt_atmos="600"    # atmos time step
+set Tf="1"
+set dt_atmos="800"    # atmos time step
+#set dt_atmos="400"    # atmos time step
+#set dt_atmos="200"    # atmos time step
 set n_split="8"       # 
-set div_damp=0.25     # divergence damping coefficient
+set div_damp=0.15     # divergence damping coefficient
 set dgflag=".true."
 set test_case="55"
 set testname="tc"
-set layout=5
+set layout=10
 ##################################################################################
 
 # set vorticity damping coefficient
-set vort_damp=0.12
+set vort_damp=0.06
 
 
 ##################################################################################
@@ -68,6 +73,7 @@ set MODE="64bit"        # choices:  32bit, 64bit
 set GRID="C$res"
 set HYPT="on"         # choices:  on, off  (controls hyperthreading)
 set COMP="repro"       # choices:  debug, repro, prod
+#set COMP="debug"       # choices:  debug, repro, prod
 set RELEASE = "solo_"$TYPE         # run cycle, 1: no restart # z2: increased
 set EXE  = "intel.x"
 
@@ -240,8 +246,8 @@ ${GRID}.${MODE}
 0 0 0 0 0 0
 "grid_spec",              -1,  "months",   1, "days",  "time"
 "atmos_static",           -1,  "hours",    1, "hours", "time"
-"atmos_4xdaily",           6, "hours",  1, "days",  "time"
-"atmos_4xdaily_ave",       6, "hours",  1, "days",  "time"
+"atmos_4xdaily",           3, "hours",  1, "days",  "time"
+"atmos_4xdaily_ave",       3, "hours",  1, "days",  "time"
 #output variables
 #=======================
 # ATMOSPHERE DIAGNOSTICS
@@ -275,8 +281,18 @@ ${GRID}.${MODE}
  "dynamics",  "cond",        "condensation", "atmos_4xdaily", "all", .false.,  "none", 2
  "dynamics",  "reevap",      "evaporation", "atmos_4xdaily", "all", .false.,  "none", 2
 
+ "dynamics",  "liq_wat",     "liq_wat",   "atmos_4xdaily",  "all",  .false.,  "none",  2
+ "dynamics",  "ice_wat",     "ice_wat",   "atmos_4xdaily",  "all",  .false.,  "none",  2
+ "dynamics",  "rainwat",     "rainwat",   "atmos_4xdaily",  "all",  .false.,  "none",  2
+ "dynamics",  "snowwat",     "snowwat",   "atmos_4xdaily",  "all",  .false.,  "none",  2
+ "dynamics",  "graupel",     "graupel",   "atmos_4xdaily",  "all",  .false.,  "none",  2
+ "dynamics",  "cld_amt",     "cld_amt",   "atmos_4xdaily",  "all",  .false.,  "none",  2
+
  "dynamics",  "prec",        "prec", "atmos_4xdaily_ave", "all", .true.,  "none", 2
  "dynamics",  "wmaxup",      "wmaxup", "atmos_4xdaily_ave", "all", "max",  "none", 2
+ "dynamics",  "pwat"           "PWATclm"    "atmos_4xdaily", "all",  .false.,  "none",  2
+ "dynamics",  "totprcpb_ave"   "PRATEsfc"   "atmos_4xdaily", "all",  .false.,  "none",  2
+ "dynamics",  "cnvprcp"        "CPRATsfc"   "atmos_4xdaily", "all",  .false.,  "none",  2
 
 ###
 # gfs static data
@@ -286,6 +302,11 @@ ${GRID}.${MODE}
  "dynamics",      "hyam",        "hyam",         "atmos_static",      "all", .false.,  "none", 2
  "dynamics",      "hybm",        "hybm",         "atmos_static",      "all", .false.,  "none", 2
  "dynamics",      "zsurf",       "HGTsfc",          "atmos_static",      "all", .false.,  "none", 2
+
+###
+## GFS variables needed for NGGPS evaluation
+####
+#
 EOF
 
 
@@ -411,8 +432,8 @@ cat > input.nml <<EOF
        hord_mt = $hord
        hord_vt = $hord
        hord_tm = $hord
-       hord_dp = $hord
-       hord_tr = $hord ! z2: changed
+       hord_dp = -5
+       hord_tr = -5
        adjust_dry_mass = .F.
        consv_te = 0.0
        fill = .F.
@@ -422,17 +443,15 @@ cat > input.nml <<EOF
        z_tracer = .T.
        fill_dp = .T.
        adiabatic = .F.
-
-       !do_cube_transform = .true. !Replaces do_schmidt
-       !target_lat = 17.5
-       !target_lon = 172.5
-       !stretch_fac = 3.0
-
        duogrid    = $dgflag
        duogrid_scheme = $dg
        adv_scheme = $adv
-
-
+       !fv_debug = .true.
+       !do_cube_transform = .true. !Replaces do_schmidt
+       !do_schmidt = .true.
+       !target_lat = -150.0
+       !target_lon = 45
+       !stretch_fac = 1.0
 /
 
  &integ_phys_nml

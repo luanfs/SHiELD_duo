@@ -5,9 +5,9 @@
 #SBATCH --partition=batch
 #SBATCH --qos=urgent
 #SBATCH --account=gfdl_w
-#SBATCH --time=3:00:00
+#SBATCH --time=0:50:00
 #SBATCH --cluster=c5
-#SBATCH --ntasks=1000
+#SBATCH --ntasks=2000
 
 set BUILD_AREA = "/ncrc/home2/Luan.Santos/SHiELD_duo/SHiELD_build" 
 set SCRATCHROOT = "/gpfs/f5/gfdl_w/scratch/Luan.Santos"
@@ -34,50 +34,23 @@ set SCRIPT_AREA = /ncrc/home2/Luan.Santos/SHiELD_duo/SHiELD_build
 set adv=2             # 1-Putman and Lin 2007 scheme; 2-LT2
 set dg=1              # duogrid (always 1)
 set gtype=0           # grid type(0-equiedge; 2-equiangular)
-set hord=5            # PPM scheme
+set hord=8            # PPM scheme
 set N=128             # N
 set npz="5"
 
-set TYPE="nh"           # choices:  nh, hydro
+#set TYPE="nh"           # choices:  nh, hydro
 set TYPE="hydro"           # choices:  nh, hydro
 
-set Tf="100"
+set dt_atmos="600"    # atmos time step
 set dt_atmos="1200"    # atmos time step
-set n_split="17"
-set dgflag=".true."
+set Tf="100"
+#set Tf="20"
+set n_split="8"
+set k_split="2"
 set test_case="45"
 set testname="modons3d"
-set layout=5
+set layout=10
 ##################################################################################
-
-# set divergence/vorticity damping coefficient
-if ($hord == "5") then
-   if ($adv == "1") then
-      set div_damp=0.12
-      set vort_damp=0.12
-   else
-      set div_damp=0.15
-      set vort_damp=0.12
-   endif
-else if ($hord == "6") then
-   if ($adv == "1") then
-      set div_damp=0.12
-      set vort_damp=0.06
-   else
-      set div_damp=0.12
-      set vort_damp=0.12
-   endif
-else if ($hord == "8") then
-   if ($adv == "1") then
-      set div_damp=0.12
-      set vort_damp=0.12
-   else
-      set div_damp=0.18
-      set vort_damp=0.06
-   endif
-else
-   set vort_damp=0
-endif
 
 
 ##################################################################################
@@ -93,6 +66,7 @@ set MODE="64bit"        # choices:  32bit, 64bit
 set GRID="C$res"
 set HYPT="on"         # choices:  on, off  (controls hyperthreading)
 set COMP="repro"       # choices:  debug, repro, prod
+#set COMP="debug"       # choices:  debug, repro, prod
 set RELEASE = "solo_"$TYPE         # run cycle, 1: no restart # z2: increased
 set EXE  = "intel.x"
 
@@ -108,14 +82,12 @@ else
   set dgflag=".false."
 endif
 
-if ($vort_damp == "0") then
-  set do_vort_damp=.false.
-else
-  set do_vort_damp=.true.
-endif
 
-set OUTDIR="${GRID}.${MEMO}.g$gtype.$dgname.adv$adv.hord$hord.dd$div_damp.vd$vort_damp"
+#set OUTDIR="${GRID}.${MEMO}.g$gtype.$dgname.adv$adv.hord$hord.dd$div_damp.vd$vort_damp"
+set OUTDIR="${GRID}.${MEMO}.g$gtype.$dgname.adv$adv.hord$hord"
 #set OUTDIR="${GRID}.${MEMO}.g$gtype.$dgname.adv$adv.hord$hord.vd$vort_damp"
+
+source ${BUILD_AREA}/site/environment.intel.sh
 
 # directory structure
 set WORKDIR =  ${SCRATCHROOT}/${RELEASE}/${OUTDIR}
@@ -136,7 +108,8 @@ set nthreads="2"
 
 # run length
 set days=$Tf
-set hours="0"
+#set days="0"
+set hours="1"
 set minutes="0"
 set seconds="0"
 
@@ -307,68 +280,67 @@ cat >! input.nml <<EOF
 
  &fms_nml
        clock_grain = 'ROUTINE',
-       domains_stack_size = 16000000,
+       domains_stack_size = 1600000000,
        print_memory_usage = .false.
 /
 
  &fv_core_nml
         layout   = $layout_x,$layout_y
         mountain = .false.
-        npx      = 129
-        npy      = 129
+        npx      = $npx
+        npy      = $npy
         ntiles   = 6
-        npz      = 5
-  grid_type = 0
- reset_eta = .F.
-
- k_split = 1
- n_split = 16
-     nwat = 0
-     fill = .false.
-   n_sponge = -1
- d2_bg_k1 = 0.0
- d2_bg_k2 = 0.00
- d4_bg = 0.08
-           d2_bg = 0.0
-	   d_ext = 0.0
- nord = 2
-	   d_con = 0.
- do_vort_damp = .F.
-    vtdm4 = 0.00
- consv_te = 0.0
-        hord_mt = 8
-        hord_vt = 8
-        hord_tm = 8
-        hord_dp = 8
-        hord_tr = 8
-      kord_tm = -9
-      kord_mt =  9
-      kord_wz =  9
-      kord_tr =  9
+        npz      = $npz
+        grid_type = $gtype
+        reset_eta = .F.
+        k_split = $k_split
+        n_split = $n_split
+        nwat = 0
+        fill = .false.
+        n_sponge = -1
+        d2_bg_k1 = 0.0
+        d2_bg_k2 = 0.00
+        d4_bg = 0.08
+        d2_bg = 0.0
+        d_ext = 0.0
+        nord = 2
+        d_con = 0.
+        do_vort_damp = .F.
+        vtdm4 = 0.00
+        consv_te = 0.0
+        hord_mt = $hord
+        hord_vt = $hord
+        hord_tm = $hord
+        hord_dp = $hord
+        hord_tr = $hord
+        kord_tm = -9
+        kord_mt =  9
+        kord_wz =  9
+        kord_tr =  9
         adiabatic = .true.  
-
         print_freq = 24
         warm_start = .false.
-
-	!fv_debug = .true.
- check_negative = .F.
-
-hydrostatic = .F.
-   a_imp = 1.0
-    beta = 0.
-   p_fac = 0.25
- do_schmidt = .T.
-    target_lat = 0.
-    target_lon = 180
-    !duogrid    = $dgflag
-    !duogrid_scheme = $dg
-    !adv_scheme = $adv
-
-
+        check_negative = .F.
+        hydrostatic = $hydrostatic
+        !phys_hydrostatic = $phys_hydrostatic
+        !use_hydro_pressure = $use_hydro_pressure
+        !a_imp = 1.0
+        !beta = 0.
+        !p_fac = 0.25
+        do_schmidt = .T.
+        !target_lat = 0.
+        target_lon = 0
+        duogrid    = $dgflag
+        duogrid_scheme = $dg
+        adv_scheme = $adv
+        !do_schmidt = .true.
+        !target_lat = -115.0
+        !target_lon = 45
+        !stretch_fac =1.0
 /
 
 &test_case_nml ! cold start
-    test_case = 45
+    test_case = $test_case
 /
 
  &main_nml
