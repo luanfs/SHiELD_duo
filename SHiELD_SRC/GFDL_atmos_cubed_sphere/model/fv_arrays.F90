@@ -1572,6 +1572,7 @@ end type duogrid_type
     real, _ALLOCATABLE :: pk  (:,:,:)   _NULL  !< pe**cappa
     real, _ALLOCATABLE :: peln(:,:,:)   _NULL  !< ln(pe)
     real, _ALLOCATABLE :: pkz (:,:,:)   _NULL  !< finite-volume mean pk
+    real, _ALLOCATABLE :: ps_av(:,:)    _NULL  !< time averaged surface pressure (pascal)
 
 ! For phys coupling:
     real, _ALLOCATABLE :: u_srf(:,:)    _NULL  ! Surface u-wind
@@ -1815,6 +1816,7 @@ contains
     allocate (   Atm%pk(is:ie    ,js:je  , npz+1) )
     allocate ( Atm%peln(is:ie,npz+1,js:je) )
     allocate (  Atm%pkz(is:ie,js:je,npz) )
+    allocate ( Atm%ps_av(is:ie  ,js:je) )
 
     allocate ( Atm%u_srf(is:ie,js:je) )
     allocate ( Atm%v_srf(is:ie,js:je) )
@@ -2323,6 +2325,7 @@ contains
     deallocate (   Atm%pk )
     deallocate ( Atm%peln )
     deallocate (  Atm%pkz )
+    deallocate (  Atm%ps_av )
     deallocate (   Atm%ts )
     deallocate ( Atm%phis )
     deallocate ( Atm%omga )

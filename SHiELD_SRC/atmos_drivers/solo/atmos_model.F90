@@ -94,7 +94,7 @@ implicit none
 
     do na = 1, num_atmos_calls
 
-       call atmosphere (Time)
+       call atmosphere (Time, na, num_atmos_calls)
 
        Time = Time + Time_step_atmos
 

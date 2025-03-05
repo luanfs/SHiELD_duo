@@ -76,11 +76,11 @@ contains
   subroutine fv_dynamics(npx, npy, npz, nq_tot,  ng, bdt, consv_te, fill,               &
                         reproduce_sum, kappa, cp_air, zvir, ptop, ks, ncnst, n_split,     &
                         q_split, u0, v0, u, v, w, delz, hydrostatic, duogrid, pt, delp, q,   &
-                        ps, pe, pk, peln, pkz, phis, q_con, omga, ua, va, uc, vc, uc_old, vc_old,&
+                        ps, ps_av, pe, pk, peln, pkz, phis, q_con, omga, ua, va, uc, vc, uc_old, vc_old,&
                         forcing_uc, forcing_vc, forcing_ud, forcing_vd, forcing_delp, &
                         ak, bk, mfx, mfy, cx, cy, cx_rk2, cy_rk2, ze0, hybrid_z, &
                         gridstruct, flagstruct, neststruct, idiag, bd, &
-                        parent_grid, domain, inline_mp, diss_est, time_total)
+                        parent_grid, domain, inline_mp, diss_est, time_total, num_atmos_calls, na)
 
     real, intent(IN) :: bdt  ! Large time-step
     real, intent(IN) :: consv_te
@@ -97,6 +97,8 @@ contains
     integer, intent(IN) :: ncnst
     integer, intent(IN) :: n_split        ! small-step horizontal dynamics
     integer, intent(IN) :: q_split        ! tracer
+    integer, intent(IN), optional :: num_atmos_calls
+    integer, intent(IN), optional :: na
     logical, intent(IN) :: fill
     logical, intent(IN) :: reproduce_sum
     logical, intent(IN) :: hydrostatic
@@ -133,7 +135,7 @@ contains
     real, intent(inout) :: peln(bd%is:bd%ie,npz+1,bd%js:bd%je)           ! ln(pe)
     real, intent(inout) :: pkz (bd%is:bd%ie,bd%js:bd%je,npz)             ! finite-volume mean pk
     real, intent(inout):: q_con(bd%isd:, bd%jsd:, 1:)
-
+    real, intent(inout) :: ps_av(bd%is:bd%ie,bd%js:bd%je)                ! Time averaged surface pressure (pascal)
 !-----------------------------------------------------------------------
 ! Others:
 !-----------------------------------------------------------------------
@@ -624,6 +626,17 @@ contains
                      inline_mp, flagstruct%c2l_ord, bd, flagstruct%fv_debug, &
                      flagstruct%w_limiter, flagstruct%do_am4_remap, &
                      flagstruct%do_fast_phys, flagstruct%consv_checker, flagstruct%adj_mass_vmr)
+
+         ! Compute time-averaged surface pressure
+         if(present(num_atmos_calls) .and. present(time_total) .and. present(na)) then
+            if (na>=86400.0/bdt) then ! time average calculation starts after 1 day of integration
+               do j = js, je
+                  do i = is, ie
+                     ps_av(i,j) = ps_av(i,j) + ps(i,j)/(k_split*(num_atmos_calls - 86400.0/bdt))
+                  enddo
+               enddo
+            endif
+         endif
 
      if ( flagstruct%fv_debug ) then
         if (is_master()) write(*,'(A, I3, A1, I3)') 'finished k_split ', n_map, '/', k_split

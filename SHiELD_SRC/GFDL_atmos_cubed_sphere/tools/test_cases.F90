@@ -605,7 +605,7 @@
 !                  case 6 (Rossby Wave-4 Case)
 !                  case 9 (Stratospheric Vortex Breaking Case)
 !
-      subroutine init_case(u,v,w,pt,delp,q,phis, ps,pe,peln,pk,pkz,  uc,vc, ua,va, ak, bk,  &
+      subroutine init_case(u,v,w,pt,delp,q,phis, ps,ps_av,pe,peln,pk,pkz,  uc,vc, ua,va, ak, bk,  &
                            forcing_uc, forcing_vc, forcing_ud, forcing_vd, forcing_delp, &
                            gridstruct, flagstruct, npx, npy, npz, ng, ncnst, nwat, ndims, nregions,        &
                            dry_mass, mountain, moist_phys, hydrostatic, hybrid_z, delz, ze0, adiabatic, &
@@ -622,6 +622,7 @@
       real ,      intent(INOUT) :: phis(bd%isd:bd%ied  ,bd%jsd:bd%jed  )
 
       real ,      intent(INOUT) ::   ps(bd%isd:bd%ied  ,bd%jsd:bd%jed  )
+      real ,      intent(INOUT) ::   ps_av(bd%is:bd%ie ,bd%js:bd%je )
       real ,      intent(INOUT) ::   pe(bd%is-1:bd%ie+1,npz+1,bd%js-1:bd%je+1)
       real ,      intent(INOUT) ::   pk(bd%is:bd%ie    ,bd%js:bd%je    ,npz+1)
       real ,      intent(INOUT) :: peln(bd%is :bd%ie   ,npz+1    ,bd%js:bd%je)
@@ -979,6 +980,7 @@
       delp(isd:is-1,je+1:jed,1:npz)=0.
       delp(ie+1:ied,jsd:js-1,1:npz)=0.
       delp(ie+1:ied,je+1:jed,1:npz)=0.
+      ps_av(is:ie,js:je) = 0.
 
 #if defined(SW_DYNAMICS)
       select case (test_case)

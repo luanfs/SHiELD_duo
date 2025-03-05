@@ -121,7 +121,7 @@ module fv_diagnostics_mod
  integer :: yr_init, mo_init, dy_init, hr_init, mn_init, sec_init
  integer :: id_dx, id_dy
 
- real              :: vrange(2), vsrange(2), wrange(2), trange(2), slprange(2), rhrange(2), psrange(2), skrange(2)
+ real              :: vrange(2), vsrange(2), wrange(2), trange(2), slprange(2), rhrange(2), psrange(2), skrange(2), psavrange(2)
 
  ! integer :: id_d_grid_ucomp, id_d_grid_vcomp   ! D grid winds
  ! integer :: id_c_grid_ucomp, id_c_grid_vcomp   ! C grid winds
@@ -219,8 +219,10 @@ contains
     skrange  = (/ -10000000.0,  10000000.0 /)  ! dissipation estimate for SKEB
 #ifdef SW_DYNAMICS
     psrange = (/.01, 1.e7 /)
+    psavrange = (/.00, 1.e7 /)
 #else
     psrange = (/40000.0, 110000.0/)
+    psavrange = (/0.0, 110000.0/)
 #endif
 
     ginv = 1./GRAV
@@ -605,6 +607,11 @@ contains
        id_ps = register_diag_field ( trim(field), 'ps', axes(1:2), Time,           &
             'surface pressure', 'Pa', missing_value=missing_value, range=psrange)
 
+!-------------------
+! Time-averaged surface pressure
+!-------------------
+       id_ps_av = register_diag_field ( trim(field), 'ps_av', axes(1:2), Time,           &
+               'surface pressure', 'Pa', missing_value=missing_value, range=psavrange)
 !-------------------
 ! Mountain torque
 !-------------------
@@ -1810,6 +1817,7 @@ contains
        if(id_zsurf > 0)  used=send_data(id_zsurf, zsurf, Time)
 #endif
        if(id_ps > 0) used=send_data(id_ps, Atm(n)%ps(isc:iec,jsc:jec), Time)
+       if(id_ps_av > 0) used=send_data(id_ps_av, Atm(n)%ps_av(isc:iec,jsc:jec), Time)
 
        if(id_pret > 0) used=send_data(id_pret, &
             Atm(n)%inline_mp%prew(isc:iec,jsc:jec)+&
