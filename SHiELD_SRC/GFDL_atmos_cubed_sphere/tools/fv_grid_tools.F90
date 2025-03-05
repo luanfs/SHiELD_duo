@@ -496,9 +496,9 @@ contains
     real, pointer, dimension(:,:,:) :: e1, e2
 
     real, pointer, dimension(:,:) :: rarea, rarea_c
-    real, pointer, dimension(:,:) :: rmt_a, mt_a
-    real, pointer, dimension(:,:) :: rmt_b, mt_b
-    real, pointer, dimension(:,:) ::  mt_c, mt_d
+    real(kind=R_GRID), pointer, dimension(:,:) :: rmt_a, mt_a
+    real(kind=R_GRID), pointer, dimension(:,:) :: rmt_b, mt_b
+    real(kind=R_GRID), pointer, dimension(:,:) ::  mt_c, mt_d
     real, pointer, dimension(:,:) :: rdx, rdy, rdxc, rdyc, rdxa, rdya
 
     integer, pointer, dimension(:,:,:) ::  iinta, jinta, iintb, jintb

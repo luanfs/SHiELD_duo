@@ -2692,7 +2692,7 @@ contains
 
     integer, intent(in) :: loc, istag, jstag, order, ilbound, upperbound
     real, dimension(ilbound:) :: field
-    real, dimension(1:) :: arr
+    real(kind=R_GRID), dimension(1:) :: arr
 
     !local
     integer ii
@@ -2725,7 +2725,7 @@ contains
 
     integer, intent(in) :: loc, istag, jstag, order, ilbound, upperbound
     real, dimension(ilbound:) :: field
-    real, dimension(1:) :: arr
+    real(kind=R_GRID), dimension(1:) :: arr
 
     !local
     integer ii

@@ -30,7 +30,7 @@ module fv_tracer2d_mod
    use boundary_mod,      only: nested_grid_BC_apply_intT
    use fv_regional_mod,   only: regional_boundary_update
    use fv_regional_mod,   only: current_time_in_seconds
-   use fv_arrays_mod,     only: fv_grid_type, fv_nest_type, fv_atmos_type, fv_grid_bounds_type
+   use fv_arrays_mod,     only: fv_grid_type, fv_nest_type, fv_atmos_type, fv_grid_bounds_type, R_GRID
    use mpp_mod,           only: mpp_error, FATAL, mpp_broadcast, mpp_send, mpp_recv, mpp_sum, mpp_max, mpp_pe
    use duogrid_mod,       only: ext_scalar
 
@@ -171,8 +171,8 @@ contains
     real, pointer, dimension(:, :, :) :: sin_sg
     real, pointer, dimension(:, :) :: dxa, dya, dx, dy
 
-    real, pointer, dimension(:)   :: dxa_cs, dya_cs
-    real, pointer, dimension(:)   :: dxc_cs, dyc_cs
+    real(kind=R_GRID), pointer, dimension(:)   :: dxa_cs, dya_cs
+    real(kind=R_GRID), pointer, dimension(:)   :: dxc_cs, dyc_cs
 
     integer :: is, ie, js, je
     integer :: isd, ied, jsd, jed
@@ -501,8 +501,8 @@ subroutine tracer_2d(q, dp1, mfx, mfy, cx, cy, cx_rk2, cy_rk2, &
       real, pointer, dimension(:,:,:) :: sin_sg
       real, pointer, dimension(:,:) :: dxa, dya, dx, dy
 
-      real, pointer, dimension(:)   :: dxa_cs, dya_cs
-      real, pointer, dimension(:)   :: dxc_cs, dyc_cs
+      real(kind=R_GRID), pointer, dimension(:)   :: dxa_cs, dya_cs
+      real(kind=R_GRID), pointer, dimension(:)   :: dxc_cs, dyc_cs
 
       integer :: is,  ie,  js,  je
       integer :: isd, ied, jsd, jed
@@ -517,7 +517,6 @@ subroutine tracer_2d(q, dp1, mfx, mfy, cx, cy, cx_rk2, cy_rk2, &
       jed = bd%jed
       adv_scheme = gridstruct%adv_scheme
 
-      if(mpp_pe()==0) print*, 'hitracer2d'
        area => gridstruct%area
       rarea => gridstruct%rarea
 
@@ -801,7 +800,6 @@ subroutine tracer_2d_nested(q, dp1, mfx, mfy, cx, cy, gridstruct, bd, domain, np
       jsd = bd%jsd
       jed = bd%jed
 
-      if(mpp_pe()==0) print*, '2d-nested'
        area => gridstruct%area
       rarea => gridstruct%rarea
 

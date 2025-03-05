@@ -25,7 +25,7 @@ module tp_core_mod
 ! !MODULE: tp_core --- A collection of routines to support FV transport
 !
  use fv_grid_utils_mod, only: big_number
- use fv_arrays_mod,     only: fv_grid_type, fv_grid_bounds_type
+ use fv_arrays_mod,     only: fv_grid_type, fv_grid_bounds_type, R_GRID
  use mpp_mod,            only: mpp_pe
 
  implicit none
@@ -113,9 +113,9 @@ contains
    real   fyy(bd%isd:bd%ied,bd%js:bd%je+1)
    real   fx1(bd%is:bd%ie+1)
    real   qmt(bd%isd:bd%ied,bd%jsd:bd%jed)  ! transported scalar * metricterm
-   real, pointer, dimension(:,:) ::  mt_a
-   real, pointer, dimension(:,:) ::  mt_c
-   real, pointer, dimension(:,:) ::  mt_d
+   real(kind=R_GRID), pointer, dimension(:,:) ::  mt_a
+   real(kind=R_GRID), pointer, dimension(:,:) ::  mt_c
+   real(kind=R_GRID), pointer, dimension(:,:) ::  mt_d
    real   damp
    integer i, j
 
@@ -1466,8 +1466,8 @@ endif
  integer, INTENT(IN) :: iord
  integer, INTENT(IN) :: npx, npy
  real   , INTENT(IN) :: q(isd:ied,jfirst:jlast)
- real   , INTENT(IN) :: mt_a(isd:ied  ,jsd:jed  )
- real   , INTENT(IN) :: mt_c(isd:ied+1,jsd:jed  )
+ real(kind=R_GRID), INTENT(IN) :: mt_a(isd:ied  ,jsd:jed  )
+ real(kind=R_GRID), INTENT(IN) :: mt_c(isd:ied+1,jsd:jed  )
  real   , INTENT(IN) :: c(is:ie+1,jfirst:jlast) ! Courant   N (like FLUX)
  real   , intent(IN) :: dxa(isd:ied,jsd:jed)
  logical, intent(IN) :: bounded_domain
@@ -1772,8 +1772,8 @@ endif
  integer, INTENT(IN) :: jord
  integer, INTENT(IN) :: npx, npy
  real   , INTENT(IN) :: q(ifirst:ilast,jsd:jed)
- real   , INTENT(IN) :: mt_a(isd:ied  ,jsd:jed  )
- real   , INTENT(IN) :: mt_d(isd:ied  ,jsd:jed+1)
+ real(kind=R_GRID), INTENT(IN) :: mt_a(isd:ied  ,jsd:jed  )
+ real(kind=R_GRID), INTENT(IN) :: mt_d(isd:ied  ,jsd:jed+1)
  real   , intent(in) :: c(isd:ied,js:je+1 )  ! Courant number
  real   , INTENT(OUT):: flux(ifirst:ilast,js:je+1)   !  Flux
  real   , intent(IN) :: dya(isd:ied,jsd:jed)

@@ -23,7 +23,7 @@ module sw_core_mod
 
  use tp_core_mod,       only: fv_tp_2d, pert_ppm, copy_corners
  use fv_mp_mod, only: fill_corners, XDir, YDir
- use fv_arrays_mod, only: fv_grid_type, fv_grid_bounds_type, fv_flags_type
+ use fv_arrays_mod, only: fv_grid_type, fv_grid_bounds_type, fv_flags_type, R_GRID
  use a2b_edge_mod, only: a2b_ord4
  use mpp_mod,            only: mpp_pe
 
@@ -1432,7 +1432,7 @@ endif
       real, pointer, dimension(:,:) :: rsina
       real, pointer, dimension(:,:) ::  cosa
       real, pointer, dimension(:,:) :: rsina2, cosa2
-      real, pointer, dimension(:,:) :: norm_tgx_d, norm_tgy_c
+      real(kind=R_GRID), pointer, dimension(:,:) :: norm_tgx_d, norm_tgy_c
 
       integer :: is,  ie,  js,  je
       integer :: isd, ied, jsd, jed
@@ -2864,8 +2864,8 @@ end subroutine divergence_corner_duo
  integer i, j
  integer is3, ie3
  integer is2, ie2
- real, pointer, dimension(:) :: rdxc
- real, pointer, dimension(:,:) :: rnorm_tgx_b
+ real(kind=R_GRID), pointer, dimension(:) :: rdxc
+ real(kind=R_GRID), pointer, dimension(:,:) :: rnorm_tgx_b
 
  rdxc => gridstruct%rdx_cs
  rnorm_tgx_b => gridstruct%rnorm_tgx_b 
@@ -3318,8 +3318,8 @@ end subroutine divergence_corner_duo
  real pmp_1, lac_1, pmp_2, lac_2
  real x0, x1, x0R, x0L
  integer i, j, is1, ie1, js3, je3
- real, pointer, dimension(:) :: rdyc
- real, pointer, dimension(:,:) :: rnorm_tgy_b
+ real(kind=R_GRID), pointer, dimension(:) :: rdyc
+ real(kind=R_GRID), pointer, dimension(:,:) :: rnorm_tgy_b
 
  rdyc => gridstruct%rdy_cs
  rnorm_tgy_b => gridstruct%rnorm_tgy_b 
@@ -4456,10 +4456,10 @@ subroutine departure_cfl_rk2(gridstruct, flagstruct, bd, crx, cry, &
     real, dimension(bd%isd:bd%ied+1, bd%jsd:bd%jed  ) :: uc_av
     real, dimension(bd%isd:bd%ied  , bd%jsd:bd%jed+1) :: vc_av
  
-    real, pointer, dimension(:) :: rdxa , rdya
-    real, pointer, dimension(:) :: rdxc , rdyc
-    real, pointer, dimension(:,:) :: rnorm_tgx_c, rnorm_tgy_d
-    real, pointer, dimension(:,:) ::  norm_tgx_c,  norm_tgy_d
+    real(kind=R_GRID), pointer, dimension(:) :: rdxa , rdya
+    real(kind=R_GRID), pointer, dimension(:) :: rdxc , rdyc
+    real(kind=R_GRID), pointer, dimension(:,:) :: rnorm_tgx_c, rnorm_tgy_d
+    real(kind=R_GRID), pointer, dimension(:,:) ::  norm_tgx_c,  norm_tgy_d
     real, intent(IN) :: dt
 
     ! aux
@@ -4550,9 +4550,9 @@ subroutine departure_cfl_rk2_bgrid_x(gridstruct, flagstruct, bd, ub_old, ub, ub_
     real, intent(INOUT), dimension(bd%is:bd%ie+1, bd%js:bd%je+1) :: ub_av
     real, intent(INOUT), dimension(bd%is-1:bd%ie+2,bd%js:bd%je+1):: ub
  
-    real, pointer, dimension(:) :: rdxa
-    real, pointer, dimension(:,:) :: rnorm_tgx_b
-    real, pointer, dimension(:,:) ::  norm_tgx_b
+    real(kind=R_GRID), pointer, dimension(:) :: rdxa
+    real(kind=R_GRID), pointer, dimension(:,:) :: rnorm_tgx_b
+    real(kind=R_GRID), pointer, dimension(:,:) ::  norm_tgx_b
     real, intent(IN) :: dt
 
     ! aux
@@ -4607,9 +4607,9 @@ subroutine departure_cfl_rk2_bgrid_y(gridstruct, flagstruct, bd, vb_old, vb, vb_
     real, intent(INOUT), dimension(bd%is:bd%ie+1, bd%js:bd%je+1) :: vb_av
     real, intent(INOUT), dimension(bd%is:bd%ie+1, bd%js-1:bd%je+2):: vb
  
-    real, pointer, dimension(:) :: rdya
-    real, pointer, dimension(:,:) :: rnorm_tgy_b
-    real, pointer, dimension(:,:) ::  norm_tgy_b
+    real(kind=R_GRID), pointer, dimension(:) :: rdya
+    real(kind=R_GRID), pointer, dimension(:,:) :: rnorm_tgy_b
+    real(kind=R_GRID), pointer, dimension(:,:) ::  norm_tgy_b
     real, intent(IN) :: dt
 
     ! aux
@@ -4673,8 +4673,8 @@ subroutine compute_xfx_yfx_rk2(gridstruct, flagstruct, bd, crx, cry, xfx, yfx)
     integer :: i, j
     integer :: is,  ie,  js,  je
     integer :: isd, ied, jsd, jed
-    real, pointer, dimension(:)   :: dxa, dya
-    real, pointer, dimension(:)   :: dxc, dyc
+    real(kind=R_GRID), pointer, dimension(:)   :: dxa, dya
+    real(kind=R_GRID), pointer, dimension(:)   :: dxc, dyc
 
     is  = bd%is
     ie  = bd%ie

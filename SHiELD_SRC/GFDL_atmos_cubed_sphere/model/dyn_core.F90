@@ -377,11 +377,11 @@ contains
 #ifdef SW_DYNAMICS
       if (test_case==-5 .or. test_case==-6 .or. test_case==-8 .or. test_case==-9)then
         ! wind at time t_n
-         current_time = (time_total-bdt)+(it-1.0d0)*dt
+         current_time = (time_total-bdt)+(it-1.0)*dt
          call wind_NL2010(bd, uc_old, vc_old, u, v, flagstruct, gridstruct, domain,current_time)
  
         ! centered in time wind (t_n+dt/2) - for variable speed advection simulations when using RK2 scheme
-         current_time = (time_total-bdt)+(it-0.5d0)*dt
+         current_time = (time_total-bdt)+(it-0.5)*dt
          call wind_NL2010(bd, uc, vc, u, v, flagstruct, gridstruct, domain,current_time)
 
       else if (test_case <= 1 ) then
