@@ -11,10 +11,10 @@ fi
 COMP="$1"
 clean="$2"
 compiler="intel"
-
+mode="64bit"
 model=nh
 cd ../../SHiELD_build/Build
-./COMPILE solo $model $COMP $compiler 64bit $clean
+./COMPILE solo $model $COMP $compiler $mode $clean
 
 # Copy the log file to test directory
-cp -r build_solo_$model.$COMP.64bit.$compiler.out ../../scripts/compilation/build_solo_$model.$COMP.64bit.$compiler.out
+cp -r build_solo_$model.$COMP.$mode.$compiler.out ../../scripts/compilation/build_solo_$model.$COMP.$mode.$compiler.out
