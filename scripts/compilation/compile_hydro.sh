@@ -1,17 +1,18 @@
 #!/bin/bash
 # Script to compile the non hydrostatic solver
 
-if [ "$#" -ne 2 ]; then
-  echo "Usage: ./compile.sh COMP clean"
+if [ "$#" -ne 3 ]; then
+  echo "Usage: ./compile_hydro.sh COMP clean mode"
   echo "choices for COMP :  debug, repro, prod"
   echo "choices for clean:  noclean, clean, cleanall"
+  echo "choices for mode :  32bit, 64bit"
   exit 1
 fi
-
 COMP="$1"
 clean="$2"
+mode="$3"
 compiler="intel"
-mode="64bit"
+
 model=hydro
 cd ../../SHiELD_build/Build
 ./COMPILE solo $model $COMP $compiler $mode $clean
